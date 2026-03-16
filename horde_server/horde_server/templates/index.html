@@ -1,0 +1,355 @@
+{% extends "base.html" %}
+{% block title %} — Home{% endblock %}
+
+{% block extra_head %}
+<style>
+.hero {
+  text-align: center;
+  padding: 5rem 1rem 3rem;
+  position: relative;
+}
+.hero-title {
+  font-family: var(--font-display);
+  font-size: clamp(2.5rem, 7vw, 5rem);
+  font-weight: 900;
+  color: var(--player);
+  text-shadow: 0 0 60px var(--glow-player), 0 0 120px rgba(80,200,255,.1);
+  letter-spacing: 4px;
+  line-height: 1;
+  margin-bottom: .5rem;
+}
+.hero-sub {
+  color: var(--gray);
+  font-size: .95rem;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  margin-bottom: 2.5rem;
+}
+.hero-cta { display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; }
+
+/* Particle dots */
+.particles { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.dot {
+  position: absolute; border-radius: 50%;
+  animation: float linear infinite;
+  opacity: .5;
+}
+@keyframes float {
+  from { transform: translateY(0) rotate(0deg); opacity: .5; }
+  to   { transform: translateY(-120vh) rotate(360deg); opacity: 0; }
+}
+
+/* Stats bar */
+.stats-bar {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 1px;
+  background: var(--grid);
+  border: 1px solid var(--grid);
+  border-radius: 12px;
+  overflow: hidden;
+  margin: 2rem 0;
+}
+.stat-cell {
+  background: var(--dgray);
+  padding: 1.2rem;
+  text-align: center;
+}
+.stat-cell .label {
+  font-size: .7rem; letter-spacing: 2px;
+  color: var(--gray); text-transform: uppercase;
+  margin-bottom: .4rem;
+}
+@media(max-width:640px) {
+  .stats-bar { grid-template-columns: 1fr 1fr; }
+}
+
+/* Mini leaderboard */
+.lb-row {
+  display: flex; align-items: center; gap: 1rem;
+  padding: .7rem 1rem;
+  border-radius: var(--radius);
+  transition: background .15s;
+}
+.lb-row:hover { background: rgba(255,255,255,.03); }
+.lb-rank {
+  font-family: var(--font-display);
+  font-size: .9rem; font-weight: 700;
+  width: 2rem; text-align: right;
+  flex-shrink: 0;
+}
+.lb-name { flex: 1; font-size: .9rem; }
+.lb-score {
+  font-family: var(--font-display);
+  color: var(--coin); font-size: .9rem;
+}
+.lb-wave { color: var(--gray); font-size: .8rem; }
+
+/* Auth modal */
+.modal-overlay {
+  display: none;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.75);
+  backdrop-filter: blur(4px);
+  z-index: 500;
+  align-items: center; justify-content: center;
+}
+.modal-overlay.open { display: flex; }
+.modal {
+  background: #121220;
+  border: 1px solid rgba(80,200,255,.3);
+  border-radius: 16px;
+  padding: 2rem;
+  width: min(420px, 90vw);
+  box-shadow: 0 0 60px rgba(80,200,255,.15);
+}
+.modal h2 { margin-bottom: 1.5rem; color: var(--player); }
+.form-group { margin-bottom: 1rem; }
+.form-group label { display: block; font-size: .75rem; color: var(--gray); margin-bottom: .4rem; letter-spacing: 1px; }
+.tabs-auth { display: flex; gap: 0; margin-bottom: 1.5rem; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--grid); }
+.tab-btn {
+  flex: 1; padding: .5rem;
+  background: transparent; border: none;
+  color: var(--gray); cursor: pointer;
+  font-family: var(--font-mono); font-size: .8rem;
+  letter-spacing: 1px; text-transform: uppercase;
+  transition: background .15s, color .15s;
+}
+.tab-btn.active { background: rgba(80,200,255,.12); color: var(--player); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="hero">
+  <div class="particles" id="particles"></div>
+  <h1 class="hero-title">HORDE SURVIVOR</h1>
+  <p class="hero-sub">Auto-aim · Collect XP · Level up · Compete</p>
+  <div class="hero-cta">
+    <button class="btn btn-primary" onclick="openAuth()">⚡ Sign In / Register</button>
+    <a href="/leaderboard" class="btn btn-coin">🏆 Leaderboard</a>
+  </div>
+</div>
+
+<div class="page-content">
+  <!-- Server stats -->
+  <div class="stats-bar" id="stats-bar">
+    <div class="stat-cell"><div class="label">Players</div><div class="stat-num text-player" id="st-players">—</div></div>
+    <div class="stat-cell"><div class="label">Total Runs</div><div class="stat-num text-xp" id="st-runs">—</div></div>
+    <div class="stat-cell"><div class="label">Top Score</div><div class="stat-num text-coin" id="st-topscore">—</div></div>
+    <div class="stat-cell"><div class="label">Best Wave</div><div class="stat-num text-hp" id="st-topwave">—</div></div>
+  </div>
+
+  <div class="grid-2" style="margin-top:2rem; gap:2rem;">
+    <!-- Mini leaderboard -->
+    <div class="card card-glow-coin">
+      <div class="flex justify-between items-center mb-2">
+        <h2 class="text-coin">🏆 Top Survivors</h2>
+        <a href="/leaderboard" class="btn btn-coin btn-sm">View All</a>
+      </div>
+      <div id="mini-lb">
+        <div class="text-gray" style="padding:1rem 0; font-size:.85rem;">Loading...</div>
+      </div>
+    </div>
+
+    <!-- How to play + download section -->
+    <div class="card card-glow-player">
+      <h2 class="text-player mb-2">🎮 Play & Connect</h2>
+      <p style="color:var(--gray); font-size:.85rem; line-height:1.7; margin-bottom:1.2rem;">
+        Download the game client and connect it to this server to sync your save and post scores to the global leaderboard.
+      </p>
+      <div style="background:rgba(80,200,255,.06); border:1px solid rgba(80,200,255,.15); border-radius:8px; padding:1rem; font-size:.8rem; color:var(--gray); margin-bottom:1rem;">
+        <strong class="text-player">server_url</strong> = <span class="text-xp">"http://YOUR_SERVER_IP:5000"</span><br>
+        Set this in <code>game_client.py</code> before running
+      </div>
+      <div id="account-panel">
+        <button class="btn btn-primary w-full" onclick="openAuth()">⚡ Sign In to Sync Saves</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Controls reference -->
+  <div class="card" style="margin-top:2rem;">
+    <h2 class="mb-2" style="color:var(--struct);">📋 Controls</h2>
+    <div class="grid-4" style="gap:.75rem;">
+      <div><span class="text-player">WASD / ↑↓←→</span><br><small class="text-gray">Move</small></div>
+      <div><span class="text-coin">Q</span><br><small class="text-gray">Special ability</small></div>
+      <div><span class="text-coin">E</span><br><small class="text-gray">Interact with structures</small></div>
+      <div><span class="text-coin">F</span><br><small class="text-gray">Sword parry</small></div>
+      <div><span class="text-coin">1 / 2 / 3</span><br><small class="text-gray">Pick upgrade (or click)</small></div>
+      <div><span class="text-coin">TAB</span><br><small class="text-gray">Card log</small></div>
+      <div><span class="text-coin">I</span><br><small class="text-gray">Field index</small></div>
+      <div><span class="text-coin">M</span><br><small class="text-gray">Meta upgrades</small></div>
+    </div>
+  </div>
+</div>
+
+<!-- Auth modal -->
+<div class="modal-overlay" id="auth-modal">
+  <div class="modal">
+    <div class="flex justify-between items-center mb-2">
+      <h2>Account</h2>
+      <button class="btn btn-sm" onclick="closeAuth()" style="border-color:var(--gray); color:var(--gray);">✕</button>
+    </div>
+    <div class="tabs-auth">
+      <button class="tab-btn active" id="tab-login" onclick="switchTab('login')">Login</button>
+      <button class="tab-btn" id="tab-register" onclick="switchTab('register')">Register</button>
+    </div>
+    <div id="auth-form">
+      <div class="form-group">
+        <label>Username</label>
+        <input type="text" id="auth-username" placeholder="your_name" class="w-full" autocomplete="username">
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" id="auth-password" placeholder="••••••" class="w-full" autocomplete="current-password">
+      </div>
+      <button class="btn btn-primary w-full" id="auth-submit" onclick="submitAuth()">Login</button>
+      <div id="auth-error" style="color:var(--hp); font-size:.8rem; margin-top:.75rem; display:none;"></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── Particles ─────────────────────────────────────────────────────────────────
+const pCont = document.getElementById('particles');
+const colours = ['#50c8ff','#3cff78','#ffd700','#ff64ff','#ffb43c'];
+for (let i = 0; i < 35; i++) {
+  const d = document.createElement('div');
+  d.className = 'dot';
+  const size = Math.random() * 4 + 2;
+  const dur  = Math.random() * 18 + 10;
+  const col  = colours[Math.floor(Math.random() * colours.length)];
+  d.style.cssText = `width:${size}px;height:${size}px;left:${Math.random()*100}%;
+    top:${Math.random()*100+100}%;background:${col};
+    animation-duration:${dur}s;animation-delay:${-Math.random()*dur}s;`;
+  pCont.appendChild(d);
+}
+
+// ── Load stats ────────────────────────────────────────────────────────────────
+async function loadStats() {
+  try {
+    const r = await fetch('/api/leaderboard?page=1');
+    const d = await r.json();
+    document.getElementById('st-players').textContent = d.total ?? '—';
+    document.getElementById('st-runs').textContent = d.total ?? '—';
+
+    const lb = document.getElementById('mini-lb');
+    if (!d.scores?.length) { lb.innerHTML = '<div class="text-gray" style="padding:1rem 0; font-size:.85rem;">No scores yet. Be the first!</div>'; return; }
+
+    const top = d.scores.slice(0, 8);
+    let best_score = 0, best_wave = 0;
+    lb.innerHTML = top.map((s, i) => {
+      if (s.score > best_score) best_score = s.score;
+      if (s.wave  > best_wave)  best_wave  = s.wave;
+      const medal = i===0?'🥇':i===1?'🥈':i===2?'🥉':String(i+1)+'.';
+      const col = i===0?'var(--coin)':i===1?'#c0c0c0':i===2?'#cd7f32':'var(--white)';
+      return `<div class="lb-row">
+        <div class="lb-rank" style="color:${col}">${medal}</div>
+        <div class="lb-name">${s.username}</div>
+        <div class="lb-wave">W${s.wave}</div>
+        <div class="lb-score">${s.score.toLocaleString()}</div>
+        <span class="badge badge-weapon">${s.weapon}</span>
+      </div>`;
+    }).join('');
+
+    document.getElementById('st-topscore').textContent = best_score.toLocaleString();
+    document.getElementById('st-topwave').textContent  = best_wave;
+  } catch(e) {
+    console.error(e);
+  }
+}
+loadStats();
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+let authMode = 'login';
+const TOKEN_KEY = 'horde_token', USER_KEY = 'horde_user';
+
+function openAuth() {
+  const saved = localStorage.getItem(USER_KEY);
+  if (saved) { showLoggedIn(saved); }
+  document.getElementById('auth-modal').classList.add('open');
+}
+function closeAuth() { document.getElementById('auth-modal').classList.remove('open'); }
+
+function switchTab(mode) {
+  authMode = mode;
+  document.getElementById('tab-login').classList.toggle('active', mode==='login');
+  document.getElementById('tab-register').classList.toggle('active', mode==='register');
+  document.getElementById('auth-submit').textContent = mode==='login' ? 'Login' : 'Register';
+}
+
+async function submitAuth() {
+  const username = document.getElementById('auth-username').value.trim();
+  const password = document.getElementById('auth-password').value;
+  const errEl = document.getElementById('auth-error');
+  errEl.style.display = 'none';
+
+  const url = authMode === 'login' ? '/api/login' : '/api/register';
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({username, password})
+    });
+    const d = await r.json();
+    if (!r.ok) { errEl.textContent = d.error; errEl.style.display='block'; return; }
+
+    if (authMode === 'register') {
+      toast('Account created! Now logging in…', 'ok');
+      switchTab('login');
+      await new Promise(res => setTimeout(res, 500));
+      await loginDirect(username, password);
+    } else {
+      localStorage.setItem(TOKEN_KEY, d.token);
+      localStorage.setItem(USER_KEY, d.username);
+      toast(`Welcome back, ${d.username}!`, 'ok');
+      closeAuth();
+      updateAccountPanel(d.username);
+    }
+  } catch(e) {
+    errEl.textContent = 'Server error. Try again.';
+    errEl.style.display='block';
+  }
+}
+
+async function loginDirect(username, password) {
+  const r = await fetch('/api/login', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({username, password})
+  });
+  const d = await r.json();
+  if (r.ok) {
+    localStorage.setItem(TOKEN_KEY, d.token);
+    localStorage.setItem(USER_KEY, d.username);
+    toast(`Signed in as ${d.username}!`, 'ok');
+    closeAuth(); updateAccountPanel(d.username);
+  }
+}
+
+function showLoggedIn(username) {
+  document.getElementById('auth-form').innerHTML = `
+    <p class="text-gray mb-2" style="font-size:.85rem;">Signed in as</p>
+    <p class="text-player" style="font-size:1.1rem; font-family:var(--font-display); margin-bottom:1.5rem;">${username}</p>
+    <button class="btn btn-danger w-full" onclick="logout()">Sign Out</button>
+  `;
+}
+
+function updateAccountPanel(username) {
+  const p = document.getElementById('account-panel');
+  if (!p) return;
+  p.innerHTML = `<div class="text-gray" style="font-size:.8rem; margin-bottom:.5rem;">Signed in as <span class="text-player">${username}</span></div>
+    <button class="btn btn-danger btn-sm" onclick="logout()">Sign Out</button>`;
+}
+
+function logout() {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(USER_KEY);
+  location.reload();
+}
+
+// Restore session on load
+const savedUser = localStorage.getItem(USER_KEY);
+if (savedUser) updateAccountPanel(savedUser);
+</script>
+{% endblock %}

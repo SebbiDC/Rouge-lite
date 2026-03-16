@@ -1,0 +1,249 @@
+{% extends "base.html" %}
+{% block title %} — Leaderboard{% endblock %}
+
+{% block extra_head %}
+<style>
+.lb-header {
+  padding: 3rem 0 1.5rem;
+  text-align: center;
+}
+.lb-header h1 { color: var(--coin); text-shadow: 0 0 40px var(--glow-coin); }
+.lb-header p  { color: var(--gray); margin-top: .5rem; letter-spacing: 2px; font-size: .85rem; }
+
+.filters {
+  display: flex; gap: 1rem; align-items: center;
+  margin-bottom: 1.5rem; flex-wrap: wrap;
+}
+.weapon-filter {
+  display: flex; gap: .5rem; flex-wrap: wrap;
+}
+.wf-btn {
+  padding: .3rem .8rem;
+  border: 1px solid var(--grid);
+  border-radius: 20px;
+  background: transparent;
+  color: var(--gray); cursor: pointer;
+  font-family: var(--font-mono); font-size: .75rem;
+  letter-spacing: 1px; text-transform: uppercase;
+  transition: all .15s;
+}
+.wf-btn:hover  { border-color: var(--player); color: var(--player); }
+.wf-btn.active { background: rgba(80,200,255,.1); border-color: var(--player); color: var(--player); }
+
+/* Podium for top 3 */
+.podium {
+  display: flex; align-items: flex-end; justify-content: center;
+  gap: 1rem; margin: 1.5rem 0 2.5rem;
+  padding: 0 1rem;
+}
+.podium-place {
+  flex: 1; max-width: 240px;
+  border-radius: 12px 12px 0 0;
+  text-align: center;
+  padding: 1.2rem 1rem .8rem;
+  position: relative;
+}
+.p1 { background: linear-gradient(180deg, rgba(255,215,0,.15) 0%, transparent 100%); border: 1px solid rgba(255,215,0,.4); min-height: 160px; }
+.p2 { background: linear-gradient(180deg, rgba(192,192,192,.1) 0%, transparent 100%); border: 1px solid rgba(192,192,192,.3); min-height: 130px; }
+.p3 { background: linear-gradient(180deg, rgba(205,127,50,.1) 0%, transparent 100%); border: 1px solid rgba(205,127,50,.3); min-height: 110px; }
+.podium-trophy { font-size: 2rem; display: block; margin-bottom: .3rem; }
+.podium-name   { font-family: var(--font-display); font-size: .9rem; margin-bottom: .3rem; }
+.podium-score  { font-family: var(--font-display); font-size: 1.3rem; font-weight: 900; }
+.podium-meta   { font-size: .75rem; color: var(--gray); margin-top: .2rem; }
+
+/* Main table rows */
+.score-row td:first-child { color: var(--gray); font-size: .8rem; padding-left: 1.2rem; }
+.score-row .username-cell { color: var(--white); font-size: .9rem; }
+.score-row .score-cell    { font-family: var(--font-display); color: var(--coin); }
+
+.pagination {
+  display: flex; gap: .5rem; justify-content: center;
+  margin-top: 2rem; flex-wrap: wrap;
+}
+.pg-btn {
+  min-width: 2.2rem; height: 2.2rem;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--grid); border-radius: var(--radius);
+  background: transparent; color: var(--gray);
+  cursor: pointer; font-family: var(--font-mono); font-size: .8rem;
+  transition: all .15s;
+}
+.pg-btn:hover  { border-color: var(--player); color: var(--player); }
+.pg-btn.active { background: rgba(80,200,255,.1); border-color: var(--player); color: var(--player); }
+
+.loading-state { text-align: center; padding: 3rem; color: var(--gray); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-content">
+  <div class="lb-header">
+    <h1>🏆 GLOBAL LEADERBOARD</h1>
+    <p>Best run per player · All time</p>
+  </div>
+
+  <!-- Podium (top 3) -->
+  <div class="podium" id="podium">
+    <div class="podium-place p2" id="pod-2"><span class="podium-trophy">🥈</span><span class="podium-name text-gray">—</span><div class="podium-score" style="color:#c0c0c0">—</div></div>
+    <div class="podium-place p1" id="pod-1"><span class="podium-trophy">🥇</span><span class="podium-name text-coin">—</span><div class="podium-score text-coin">—</div></div>
+    <div class="podium-place p3" id="pod-3"><span class="podium-trophy">🥉</span><span class="podium-name text-gray">—</span><div class="podium-score" style="color:#cd7f32">—</div></div>
+  </div>
+
+  <!-- Filters -->
+  <div class="filters">
+    <span class="text-gray" style="font-size:.75rem; letter-spacing:1px;">WEAPON:</span>
+    <div class="weapon-filter" id="weapon-filter">
+      <button class="wf-btn active" data-weapon="">ALL</button>
+      <button class="wf-btn" data-weapon="pistol">PISTOL</button>
+      <button class="wf-btn" data-weapon="sword">SWORD</button>
+      <button class="wf-btn" data-weapon="raygun">RAYGUN</button>
+      <button class="wf-btn" data-weapon="lightning">LIGHTNING</button>
+      <button class="wf-btn" data-weapon="shotgun">SHOTGUN</button>
+      <button class="wf-btn" data-weapon="plasma">PLASMA</button>
+      <button class="wf-btn" data-weapon="sniper">SNIPER</button>
+    </div>
+    <input type="text" id="search-player" placeholder="Search player…" style="margin-left:auto; width:180px;" oninput="searchDebounce()">
+  </div>
+
+  <!-- Scores table -->
+  <div class="card" style="padding:0; overflow:hidden;">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:4rem;">#</th>
+          <th>Player</th>
+          <th>Score</th>
+          <th>Wave</th>
+          <th>Level</th>
+          <th>Kills</th>
+          <th>Weapon</th>
+          <th>Date</th>
+        </tr>
+      </thead>
+      <tbody id="lb-body">
+        <tr><td colspan="8" class="loading-state">Loading scores…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="pagination" id="pagination"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentPage = 1;
+let currentWeapon = '';
+let searchTimer = null;
+const PER_PAGE = 50;
+
+function searchDebounce() {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => loadPage(1), 350);
+}
+
+document.querySelectorAll('.wf-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.wf-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentWeapon = btn.dataset.weapon;
+    loadPage(1);
+  });
+});
+
+async function loadPage(page) {
+  currentPage = page;
+  const body  = document.getElementById('lb-body');
+  body.innerHTML = '<tr><td colspan="8" class="loading-state">Loading…</td></tr>';
+
+  let url = `/api/leaderboard?page=${page}`;
+  if (currentWeapon) url += `&weapon=${currentWeapon}`;
+
+  try {
+    const r = await fetch(url);
+    const d = await r.json();
+    renderTable(d, page);
+  } catch(e) {
+    body.innerHTML = '<tr><td colspan="8" class="loading-state" style="color:var(--hp);">Failed to load scores.</td></tr>';
+  }
+}
+
+function renderTable(d, page) {
+  const body = document.getElementById('lb-body');
+  const offset = (page - 1) * PER_PAGE;
+
+  if (!d.scores?.length) {
+    body.innerHTML = '<tr><td colspan="8" class="loading-state">No scores yet.</td></tr>';
+    updatePodium([]);
+    return;
+  }
+
+  if (page === 1) updatePodium(d.scores);
+
+  body.innerHTML = d.scores.map((s, i) => {
+    const rank = offset + i + 1;
+    const cls  = rank <= 3 ? `rank-${rank}` : 'score-row';
+    const date = new Date(s.submitted_at * 1000).toLocaleDateString();
+    return `<tr class="${cls}">
+      <td>${rank}</td>
+      <td class="username-cell">${s.username}</td>
+      <td class="score-cell">${s.score.toLocaleString()}</td>
+      <td>${s.wave}</td>
+      <td>${s.level}</td>
+      <td>${s.kills}</td>
+      <td><span class="badge badge-weapon">${s.weapon}</span></td>
+      <td class="text-gray" style="font-size:.75rem;">${date}</td>
+    </tr>`;
+  }).join('');
+
+  renderPagination(d.total, page, PER_PAGE);
+}
+
+function updatePodium(scores) {
+  const positions = [
+    {idx: 1, id: 'pod-1', trophy: '🥇', scoreCol: 'var(--coin)'},
+    {idx: 0, id: 'pod-2', trophy: '🥈', scoreCol: '#c0c0c0'},
+    {idx: 2, id: 'pod-3', trophy: '🥉', scoreCol: '#cd7f32'},
+  ];
+  positions.forEach(({idx, id, trophy, scoreCol}) => {
+    const el = document.getElementById(id);
+    const s  = scores[idx];
+    if (!s) return;
+    el.querySelector('.podium-trophy').textContent = trophy;
+    el.querySelector('.podium-name').textContent   = s.username;
+    el.querySelector('.podium-score').textContent  = s.score.toLocaleString();
+    el.querySelector('.podium-score').style.color  = scoreCol;
+    const existing = el.querySelector('.podium-meta');
+    const meta = document.createElement('div');
+    meta.className = 'podium-meta';
+    meta.textContent = `Wave ${s.wave} · ${s.weapon}`;
+    if (existing) existing.replaceWith(meta); else el.appendChild(meta);
+  });
+}
+
+function renderPagination(total, current, perPage) {
+  const pages = Math.ceil(total / perPage);
+  const pag   = document.getElementById('pagination');
+  if (pages <= 1) { pag.innerHTML = ''; return; }
+
+  let html = '';
+  html += `<button class="pg-btn" ${current===1?'disabled':''} onclick="loadPage(${current-1})">‹</button>`;
+
+  const range = [];
+  for (let i = 1; i <= pages; i++) {
+    if (i === 1 || i === pages || Math.abs(i - current) <= 2) range.push(i);
+    else if (range[range.length-1] !== '…') range.push('…');
+  }
+
+  range.forEach(p => {
+    if (p === '…') html += `<span class="pg-btn" style="cursor:default">…</span>`;
+    else html += `<button class="pg-btn ${p===current?'active':''}" onclick="loadPage(${p})">${p}</button>`;
+  });
+
+  html += `<button class="pg-btn" ${current===pages?'disabled':''} onclick="loadPage(${current+1})">›</button>`;
+  pag.innerHTML = html;
+}
+
+loadPage(1);
+</script>
+{% endblock %}

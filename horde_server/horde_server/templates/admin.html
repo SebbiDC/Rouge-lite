@@ -1,0 +1,441 @@
+{% extends "base.html" %}
+{% block title %} — Admin{% endblock %}
+
+{% block extra_head %}
+<style>
+.admin-login {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 80vh;
+}
+.admin-login .card {
+  width: min(420px,90vw);
+  text-align: center;
+}
+.admin-login h2 { color: var(--hp); margin-bottom: 1.5rem; }
+
+.admin-layout { display: none; }
+.admin-layout.active { display: block; }
+
+.admin-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 1.5rem 0 1rem;
+  border-bottom: 1px solid var(--grid);
+  margin-bottom: 2rem;
+}
+.admin-header h1 { color: var(--hp); font-size: 1.5rem; }
+
+/* Stat cards */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+.stat-card {
+  background: var(--dgray);
+  border: 1px solid rgba(255,255,255,.07);
+  border-radius: 10px;
+  padding: 1.2rem;
+}
+.stat-card .label { font-size: .7rem; color: var(--gray); letter-spacing: 2px; text-transform: uppercase; margin-bottom: .4rem; }
+.stat-card .value { font-family: var(--font-display); font-size: 2rem; font-weight: 900; }
+
+/* Tabs */
+.admin-tabs {
+  display: flex; gap: 0; margin-bottom: 1.5rem;
+  border-bottom: 1px solid var(--grid);
+}
+.admin-tab {
+  padding: .6rem 1.4rem;
+  background: transparent; border: none;
+  color: var(--gray); cursor: pointer;
+  font-family: var(--font-mono); font-size: .8rem;
+  letter-spacing: 1px; text-transform: uppercase;
+  border-bottom: 2px solid transparent;
+  transition: color .15s, border-color .15s;
+  margin-bottom: -1px;
+}
+.admin-tab:hover  { color: var(--white); }
+.admin-tab.active { color: var(--hp); border-bottom-color: var(--hp); }
+
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* Weapon chart */
+.weapon-bar {
+  display: flex; align-items: center; gap: .8rem;
+  margin-bottom: .5rem;
+}
+.weapon-bar .name { width: 80px; font-size: .8rem; color: var(--gray); text-transform: uppercase; letter-spacing: 1px; }
+.weapon-bar .bar-track { flex: 1; height: 8px; background: rgba(255,255,255,.05); border-radius: 4px; overflow: hidden; }
+.weapon-bar .bar-fill { height: 100%; border-radius: 4px; background: var(--player); transition: width .5s ease; }
+.weapon-bar .count { font-size: .8rem; color: var(--gray); width: 40px; text-align: right; }
+
+/* Table actions */
+.action-btns { display: flex; gap: .4rem; }
+
+/* Recent runs */
+.recent-run {
+  display: flex; align-items: center; gap: .75rem;
+  padding: .5rem .75rem;
+  border-radius: var(--radius);
+  border-bottom: 1px solid rgba(255,255,255,.04);
+}
+.recent-run:last-child { border: none; }
+
+/* Player search */
+.search-bar {
+  display: flex; gap: .75rem; margin-bottom: 1rem;
+}
+
+.ban-badge {
+  display: inline-block; padding: .15rem .5rem;
+  border-radius: 4px; font-size: .7rem;
+  background: rgba(220,50,50,.15); border: 1px solid rgba(220,50,50,.4);
+  color: var(--hp);
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-content">
+
+<!-- Login gate -->
+<div class="admin-login" id="admin-login">
+  <div class="card">
+    <h2>🔐 Admin Access</h2>
+    <p class="text-gray" style="font-size:.85rem; margin-bottom:1.5rem;">Enter your admin token to continue.</p>
+    <div class="form-group" style="text-align:left;">
+      <label>Admin Token</label>
+      <input type="password" id="admin-token-input" class="w-full" placeholder="••••••••" onkeydown="if(event.key==='Enter')adminLogin()">
+    </div>
+    <button class="btn btn-danger w-full" onclick="adminLogin()">Authenticate</button>
+    <div id="admin-login-err" style="color:var(--hp); font-size:.8rem; margin-top:.75rem; display:none;"></div>
+  </div>
+</div>
+
+<!-- Admin panel (hidden until auth) -->
+<div class="admin-layout" id="admin-panel">
+  <div class="admin-header">
+    <h1>⚡ Admin Panel</h1>
+    <div class="flex gap-2 items-center">
+      <button class="btn btn-sm" style="border-color:var(--gray);color:var(--gray);" onclick="refreshStats()">↻ Refresh</button>
+      <button class="btn btn-danger btn-sm" onclick="adminLogout()">Logout</button>
+    </div>
+  </div>
+
+  <!-- Stats row -->
+  <div class="stat-grid" id="stat-grid">
+    <div class="stat-card"><div class="label">Players</div><div class="value text-player" id="a-players">—</div></div>
+    <div class="stat-card"><div class="label">Total Runs</div><div class="value text-xp" id="a-runs">—</div></div>
+    <div class="stat-card"><div class="label">Top Score</div><div class="value text-coin" id="a-topscore">—</div></div>
+    <div class="stat-card"><div class="label">Banned</div><div class="value text-hp" id="a-banned">—</div></div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="admin-tabs">
+    <button class="admin-tab active" onclick="showTab('overview')">Overview</button>
+    <button class="admin-tab" onclick="showTab('players')">Players</button>
+    <button class="admin-tab" onclick="showTab('scores')">Scores</button>
+    <button class="admin-tab" onclick="showTab('danger')">⚠ Danger Zone</button>
+  </div>
+
+  <!-- Overview tab -->
+  <div class="tab-panel active" id="tab-overview">
+    <div class="grid-2" style="gap:1.5rem;">
+      <!-- Recent runs -->
+      <div class="card">
+        <h3 class="text-player mb-2">Recent Runs</h3>
+        <div id="recent-runs">
+          <div class="text-gray" style="font-size:.85rem;">Loading…</div>
+        </div>
+      </div>
+      <!-- Weapon popularity -->
+      <div class="card">
+        <h3 class="text-player mb-2">Weapon Popularity</h3>
+        <div id="weapon-chart">
+          <div class="text-gray" style="font-size:.85rem;">Loading…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Players tab -->
+  <div class="tab-panel" id="tab-players">
+    <div class="search-bar">
+      <input type="text" id="player-search" placeholder="Search username…" style="flex:1;" oninput="playerSearchDebounce()">
+      <button class="btn btn-primary btn-sm" onclick="loadPlayers(1)">Search</button>
+    </div>
+    <div class="card" style="padding:0; overflow:hidden;">
+      <table>
+        <thead>
+          <tr>
+            <th>Username</th>
+            <th>Best Score</th>
+            <th>Best Wave</th>
+            <th>Runs</th>
+            <th>Status</th>
+            <th>Joined</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="players-table">
+          <tr><td colspan="7" class="loading-state" style="padding:2rem; text-align:center; color:var(--gray);">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="pagination" id="player-pagination"></div>
+  </div>
+
+  <!-- Scores tab -->
+  <div class="tab-panel" id="tab-scores">
+    <div class="card" style="padding:0; overflow:hidden;">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Player</th>
+            <th>Score</th>
+            <th>Wave</th>
+            <th>Weapon</th>
+            <th>Date</th>
+            <th>Delete</th>
+          </tr>
+        </thead>
+        <tbody id="scores-table">
+          <tr><td colspan="7" class="loading-state" style="padding:2rem; text-align:center; color:var(--gray);">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Danger zone -->
+  <div class="tab-panel" id="tab-danger">
+    <div class="card" style="border-color:rgba(220,50,50,.3); max-width:600px;">
+      <h3 class="text-hp mb-2">⚠ Danger Zone</h3>
+      <p class="text-gray" style="font-size:.85rem; margin-bottom:1.5rem;">These actions are irreversible. Be careful.</p>
+
+      <div style="border-top:1px solid rgba(220,50,50,.2); padding-top:1rem;">
+        <h3 style="margin-bottom:.5rem;">Reset All Cloud Saves</h3>
+        <p class="text-gray" style="font-size:.8rem; margin-bottom:.75rem;">Wipes ALL players' cloud saves. Local saves are unaffected.</p>
+        <button class="btn btn-danger" onclick="confirmReset('saves')">Reset All Cloud Saves</button>
+      </div>
+    </div>
+  </div>
+
+</div><!-- end admin-panel -->
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const ADMIN_KEY = 'horde_admin_token';
+let adminToken = '';
+let playerSearchTimer = null;
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+function adminLogin() {
+  const token = document.getElementById('admin-token-input').value.trim();
+  if (!token) return;
+  adminToken = token;
+  sessionStorage.setItem(ADMIN_KEY, token);
+  checkAdmin();
+}
+
+async function checkAdmin() {
+  try {
+    const r = await adminFetch('/api/admin/stats');
+    if (!r.ok) throw new Error();
+    document.getElementById('admin-login').style.display  = 'none';
+    document.getElementById('admin-panel').classList.add('active');
+    const d = await r.json();
+    renderStats(d);
+    loadPlayers(1);
+    loadScores();
+  } catch {
+    const e = document.getElementById('admin-login-err');
+    if (e) { e.textContent = 'Invalid token.'; e.style.display = 'block'; }
+  }
+}
+
+function adminLogout() {
+  sessionStorage.removeItem(ADMIN_KEY);
+  adminToken = '';
+  document.getElementById('admin-login').style.display  = 'flex';
+  document.getElementById('admin-panel').classList.remove('active');
+}
+
+async function adminFetch(url, opts={}) {
+  return fetch(url, {
+    ...opts,
+    headers: { 'X-Admin-Token': adminToken, 'Content-Type': 'application/json', ...(opts.headers||{}) }
+  });
+}
+
+// ── Stats ─────────────────────────────────────────────────────────────────────
+async function refreshStats() {
+  const r = await adminFetch('/api/admin/stats');
+  const d = await r.json();
+  renderStats(d);
+  toast('Stats refreshed', 'ok');
+}
+
+function renderStats(d) {
+  document.getElementById('a-players').textContent  = d.total_players ?? '—';
+  document.getElementById('a-runs').textContent     = d.total_scores  ?? '—';
+  document.getElementById('a-topscore').textContent = (d.top_score ?? 0).toLocaleString();
+  document.getElementById('a-banned').textContent   = d.total_banned  ?? '—';
+
+  // Recent runs
+  const rr = document.getElementById('recent-runs');
+  if (d.recent_runs?.length) {
+    rr.innerHTML = d.recent_runs.map(s => `
+      <div class="recent-run">
+        <span class="text-player" style="min-width:110px;">${s.username}</span>
+        <span class="text-coin" style="min-width:80px; font-family:var(--font-display);">${s.score.toLocaleString()}</span>
+        <span class="badge badge-weapon">${s.weapon}</span>
+        <span class="text-gray" style="font-size:.75rem; margin-left:auto;">W${s.wave}</span>
+      </div>
+    `).join('');
+  } else {
+    rr.innerHTML = '<div class="text-gray" style="font-size:.85rem;">No runs yet.</div>';
+  }
+
+  // Weapon chart
+  const wc = document.getElementById('weapon-chart');
+  if (d.weapon_popularity && Object.keys(d.weapon_popularity).length) {
+    const max = Math.max(...Object.values(d.weapon_popularity));
+    wc.innerHTML = Object.entries(d.weapon_popularity)
+      .sort(([,a],[,b]) => b - a)
+      .map(([w, c]) => `
+        <div class="weapon-bar">
+          <div class="name">${w}</div>
+          <div class="bar-track"><div class="bar-fill" style="width:${(c/max*100).toFixed(1)}%"></div></div>
+          <div class="count">${c}</div>
+        </div>
+      `).join('');
+  } else {
+    wc.innerHTML = '<div class="text-gray" style="font-size:.85rem;">No data yet.</div>';
+  }
+}
+
+// ── Players ───────────────────────────────────────────────────────────────────
+let playerPage = 1;
+
+function playerSearchDebounce() {
+  clearTimeout(playerSearchTimer);
+  playerSearchTimer = setTimeout(() => loadPlayers(1), 350);
+}
+
+async function loadPlayers(page) {
+  playerPage = page;
+  const q = encodeURIComponent(document.getElementById('player-search').value || '');
+  const r = await adminFetch(`/api/admin/players?page=${page}&q=${q}`);
+  const d = await r.json();
+
+  const tbody = document.getElementById('players-table');
+  if (!d.players?.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:1.5rem; text-align:center; color:var(--gray);">No players found.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = d.players.map(p => `
+    <tr>
+      <td class="text-player">${p.username}</td>
+      <td class="text-coin" style="font-family:var(--font-display);">${p.best_score.toLocaleString()}</td>
+      <td>${p.best_wave}</td>
+      <td class="text-gray">${p.total_runs}</td>
+      <td>${p.banned ? '<span class="ban-badge">BANNED</span>' : '<span style="color:var(--xp); font-size:.75rem;">ACTIVE</span>'}</td>
+      <td class="text-gray" style="font-size:.75rem;">${new Date(p.created_at*1000).toLocaleDateString()}</td>
+      <td>
+        <div class="action-btns">
+          <button class="btn btn-sm ${p.banned?'btn-primary':'btn-danger'}"
+            onclick="toggleBan('${p.username}', ${p.banned})">
+            ${p.banned ? 'Unban' : 'Ban'}
+          </button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+
+  // Pagination
+  const pages = Math.ceil(d.total / 30);
+  const pag   = document.getElementById('player-pagination');
+  if (pages > 1) {
+    pag.innerHTML = Array.from({length: pages}, (_,i) => i+1)
+      .map(p => `<button class="pg-btn ${p===page?'active':''}" onclick="loadPlayers(${p})">${p}</button>`)
+      .join('');
+  }
+}
+
+async function toggleBan(username, currentlyBanned) {
+  const r = await adminFetch(`/api/admin/ban/${username}`, {method:'POST'});
+  const d = await r.json();
+  toast(`${d.username} ${d.action}`, d.action==='banned' ? 'error' : 'ok');
+  loadPlayers(playerPage);
+}
+
+// ── Scores ────────────────────────────────────────────────────────────────────
+async function loadScores() {
+  const r = await adminFetch('/api/leaderboard?page=1');
+  const d = await r.json();
+
+  const tbody = document.getElementById('scores-table');
+  if (!d.scores?.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="padding:1.5rem; text-align:center; color:var(--gray);">No scores.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = d.scores.map(s => `
+    <tr>
+      <td class="text-gray" style="font-size:.75rem;">${s.id}</td>
+      <td class="text-player">${s.username}</td>
+      <td class="text-coin" style="font-family:var(--font-display);">${s.score.toLocaleString()}</td>
+      <td>${s.wave}</td>
+      <td><span class="badge badge-weapon">${s.weapon}</span></td>
+      <td class="text-gray" style="font-size:.75rem;">${new Date(s.submitted_at*1000).toLocaleDateString()}</td>
+      <td>
+        <button class="btn btn-danger btn-sm" onclick="deleteScore(${s.id})">Delete</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function deleteScore(id) {
+  if (!confirm(`Delete score #${id}?`)) return;
+  const r = await adminFetch(`/api/admin/score/${id}`, {method:'DELETE'});
+  if (r.ok) { toast(`Score #${id} deleted`, 'ok'); loadScores(); }
+  else toast('Failed to delete', 'error');
+}
+
+// ── Danger zone ───────────────────────────────────────────────────────────────
+async function confirmReset(type) {
+  if (type === 'saves') {
+    if (!confirm('WIPE ALL CLOUD SAVES? This cannot be undone.')) return;
+    const r = await adminFetch('/api/admin/reset_saves', {method:'POST'});
+    const d = await r.json();
+    toast(d.message || 'Done', 'ok');
+  }
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+function showTab(name) {
+  document.querySelectorAll('.admin-tab').forEach((t,i) => {
+    const names = ['overview','players','scores','danger'];
+    t.classList.toggle('active', names[i] === name);
+  });
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById(`tab-${name}`).classList.add('active');
+
+  if (name === 'players') loadPlayers(1);
+  if (name === 'scores')  loadScores();
+}
+
+// ── Auto-login from session ───────────────────────────────────────────────────
+const savedToken = sessionStorage.getItem(ADMIN_KEY);
+if (savedToken) {
+  adminToken = savedToken;
+  checkAdmin();
+}
+</script>
+{% endblock %}
