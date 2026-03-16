@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% block title %} — Play{% endblock %}
+
+{% block extra_head %}
+<style>
+.game-page {
+  display: flex; flex-direction: column; align-items: center;
+  padding: 1.5rem 1rem 2rem;
+}
+.game-header { text-align: center; margin-bottom: 1.5rem; }
+.game-header h1 { color: var(--player); font-size: 1.6rem; }
+.game-header p  { color: var(--gray); font-size: .8rem; letter-spacing: 2px; margin-top: .3rem; }
+
+.game-wrap {
+  position: relative;
+  width: 1280px; max-width: 100%;
+  aspect-ratio: 16/9;
+  background: #0a0a12;
+  border: 2px solid rgba(80,200,255,.3);
+  border-radius: 12px; overflow: hidden;
+  box-shadow: 0 0 60px rgba(80,200,255,.12);
+}
+#game-frame { width: 100%; height: 100%; border: none; display: block; }
+
+.game-loading {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  background: #0a0a12; z-index: 10;
+  transition: opacity .5s;
+}
+.game-loading.hidden { opacity: 0; pointer-events: none; }
+.loader-title {
+  font-family: var(--font-display); font-size: 2rem; font-weight: 900;
+  color: var(--player); text-shadow: 0 0 40px var(--glow-player);
+  margin-bottom: 1.5rem; letter-spacing: 3px;
+}
+.progress-track {
+  width: 320px; height: 6px;
+  background: rgba(255,255,255,.08);
+  border-radius: 3px; overflow: hidden; margin-bottom: .75rem;
+}
+.progress-fill {
+  height: 100%; border-radius: 3px;
+  background: var(--player); width: 0%;
+  transition: width .4s ease;
+  box-shadow: 0 0 12px var(--glow-player);
+}
+.loader-status { font-size: .75rem; color: var(--gray); letter-spacing: 1px; }
+
+.fs-btn {
+  position: absolute; top: .75rem; right: .75rem; z-index: 20;
+  padding: .3rem .7rem;
+  background: rgba(0,0,0,.6); border: 1px solid rgba(255,255,255,.15);
+  border-radius: 6px; color: var(--gray); font-size: .75rem; cursor: pointer;
+  transition: all .15s; backdrop-filter: blur(4px);
+}
+.fs-btn:hover { color: var(--white); border-color: rgba(255,255,255,.4); }
+
+.controls-bar {
+  display: flex; gap: 2rem; flex-wrap: wrap;
+  justify-content: center; margin-top: 1rem;
+  padding: .75rem 1.5rem;
+  background: rgba(255,255,255,.03);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 8px; max-width: 1280px; width: 100%;
+}
+.ctrl-item { font-size: .75rem; color: var(--gray); }
+.ctrl-item span { color: var(--bullet); font-family: var(--font-display); }
+
+.mobile-warn {
+  display: none;
+  background: rgba(255,180,60,.1); border: 1px solid rgba(255,180,60,.3);
+  border-radius: 8px; padding: .75rem 1.2rem;
+  color: var(--event); font-size: .8rem;
+  margin-bottom: 1rem; text-align: center; max-width: 600px;
+}
+@media(max-width:640px) { .mobile-warn { display: block; } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="game-page">
+  <div class="game-header">
+    <h1>⚡ PLAY IN BROWSER</h1>
+    <p>POWERED BY PYGAME + WEBASSEMBLY</p>
+  </div>
+
+  <div class="mobile-warn">
+    ⚠ Best played on desktop. Use keyboard controls.
+  </div>
+
+  <div class="game-wrap" id="game-wrap">
+    <div class="game-loading" id="game-loading">
+      <div class="loader-title">HORDE SURVIVOR</div>
+      <div class="progress-track">
+        <div class="progress-fill" id="load-bar"></div>
+      </div>
+      <div class="loader-status" id="load-status">Loading WebAssembly runtime…</div>
+    </div>
+
+    <button class="fs-btn" onclick="toggleFullscreen()">⛶ Fullscreen</button>
+
+    <iframe id="game-frame" src="" allow="autoplay; fullscreen"
+            sandbox="allow-scripts allow-same-origin allow-forms"></iframe>
+  </div>
+
+  <div class="controls-bar">
+    <div class="ctrl-item"><span>WASD</span> Move</div>
+    <div class="ctrl-item"><span>Q</span> Special</div>
+    <div class="ctrl-item"><span>E</span> Interact</div>
+    <div class="ctrl-item"><span>F</span> Parry</div>
+    <div class="ctrl-item"><span>1/2/3</span> Upgrade</div>
+    <div class="ctrl-item"><span>TAB</span> Card log</div>
+    <div class="ctrl-item"><span>I</span> Index</div>
+    <div class="ctrl-item"><span>M</span> Meta</div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const bar    = document.getElementById('load-bar');
+const status = document.getElementById('load-status');
+const overlay= document.getElementById('game-loading');
+const frame  = document.getElementById('game-frame');
+
+const msgs = [
+  'Loading WebAssembly runtime…',
+  'Initialising pygame…',
+  'Loading game assets…',
+  'Spawning first wave…',
+  'Get ready…',
+];
+
+// Animate the loading bar while the iframe loads
+let pct = 0;
+const fakeProgress = setInterval(() => {
+  pct = Math.min(90, pct + Math.random() * 8 + 2);
+  bar.style.width = pct + '%';
+  status.textContent = msgs[Math.min(Math.floor(pct / 20), msgs.length - 1)];
+}, 700);
+
+// Load the game — points to Flask route that serves static/game/index.html
+frame.src = '/game/play';
+
+frame.onload = () => {
+  clearInterval(fakeProgress);
+  bar.style.width = '100%';
+  status.textContent = 'Ready!';
+  setTimeout(() => overlay.classList.add('hidden'), 600);
+};
+
+frame.onerror = () => {
+  clearInterval(fakeProgress);
+  overlay.innerHTML = `
+    <div style="text-align:center;padding:2rem;">
+      <div style="font-size:2rem;margin-bottom:1rem;">🎮</div>
+      <div style="font-family:var(--font-display);font-size:1.1rem;color:var(--hp);margin-bottom:1rem;">
+        GAME NOT BUILT YET
+      </div>
+      <p style="color:var(--gray);font-size:.85rem;line-height:1.8;max-width:400px;">
+        Run <code style="color:var(--player);">build_browser_windows.bat</code>
+        in your project folder, then restart the server.
+      </p>
+    </div>`;
+};
+
+function toggleFullscreen() {
+  const wrap = document.getElementById('game-wrap');
+  if (!document.fullscreenElement) {
+    wrap.requestFullscreen().catch(() => {});
+  } else {
+    document.exitFullscreen();
+  }
+}
+</script>
+{% endblock %}

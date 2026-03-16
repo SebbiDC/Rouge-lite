@@ -1,0 +1,1 @@
+Copy pygbag build output here: build/web/* -> static/game/

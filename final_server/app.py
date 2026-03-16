@@ -1,17 +1,36 @@
 """
 HORDE SURVIVOR — Flask Backend v2
 ===================================
-New in this version:
-  - GET /api/leaderboard/stream  → SSE endpoint, pushes updates whenever scores change
-  - GET /game                    → browser-playable game (Pygame WASM via Pygbag CDN)
-  - All previous routes unchanged
+Routes:
+  Public:
+    GET  /                          -> landing page
+    GET  /leaderboard               -> full leaderboard page
+    GET  /game                      -> browser game page
+    GET  /game/play                 -> serves pygbag index.html
+    GET  /game/play/<path>          -> serves pygbag WASM assets
+    GET  /api/leaderboard           -> JSON top scores
+    GET  /api/leaderboard/stream    -> SSE live updates
+    POST /api/score                 -> submit a run score
+    POST /api/register              -> create account
+    POST /api/login                 -> login, get token
+    GET  /api/profile/<username>    -> player stats
+    GET  /api/sync/<username>       -> pull server save
+    POST /api/sync/<username>       -> push local save
+
+  Admin (requires X-Admin-Token header):
+    GET  /admin
+    GET  /api/admin/stats
+    GET  /api/admin/players
+    DELETE /api/admin/score/<id>
+    POST /api/admin/ban/<username>
+    POST /api/admin/reset_saves
 """
 
 import os, json, hashlib, secrets, time, queue, threading
 from functools import wraps
 
 from flask import (Flask, request, jsonify, render_template,
-                   redirect, url_for, send_from_directory, g, Response, stream_with_context)
+                   send_from_directory, g, Response, stream_with_context)
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
 
@@ -23,7 +42,7 @@ os.makedirs(app.instance_path, exist_ok=True)
 
 app.config.update(
     SECRET_KEY = os.environ.get("SECRET_KEY", secrets.token_hex(32)),
-    SQLALCHEMY_DATABASE_URI = f"sqlite:///{os.path.join(app.instance_path, 'horde.db')}",
+    SQLALCHEMY_DATABASE_URI = "sqlite:///" + os.path.join(app.instance_path, "horde.db"),
     SQLALCHEMY_TRACK_MODIFICATIONS = False,
     ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "changeme_admin_secret"),
     MAX_SCORES_PER_PLAYER = 10,
@@ -33,14 +52,11 @@ app.config.update(
 db = SQLAlchemy(app)
 
 # ─── SSE broadcaster ──────────────────────────────────────────────────────────
-# Any connected leaderboard page will be pushed a "refresh" event when a new
-# score is submitted, so they update in real time (< 1s lag) without polling.
-_sse_listeners: list[queue.Queue] = []
+_sse_listeners = []
 _sse_lock = threading.Lock()
 
-def _sse_broadcast(event: str, data: str):
-    """Send an SSE message to all connected clients."""
-    msg = f"event: {event}\ndata: {data}\n\n"
+def _sse_broadcast(event, data):
+    msg = "event: {}\ndata: {}\n\n".format(event, data)
     dead = []
     with _sse_lock:
         for q in _sse_listeners:
@@ -134,7 +150,7 @@ def require_admin(f):
         return f(*args, **kwargs)
     return decorated
 
-def _trim_scores(player_id: int):
+def _trim_scores(player_id):
     limit = app.config["MAX_SCORES_PER_PLAYER"]
     rows  = Score.query.filter_by(player_id=player_id)\
                  .order_by(Score.score.desc()).all()
@@ -142,7 +158,7 @@ def _trim_scores(player_id: int):
         db.session.delete(old)
 
 # ─── Auth ─────────────────────────────────────────────────────────────────────
-@app.post("/api/register")
+@app.route("/api/register", methods=["POST"])
 def register():
     data     = request.get_json(force=True) or {}
     username = (data.get("username") or "").strip()[:32]
@@ -154,10 +170,11 @@ def register():
     if Player.query.filter_by(username=username).first():
         return jsonify({"error": "Username taken"}), 409
     p = Player(username=username, password_hash=hash_pw(password))
-    db.session.add(p); db.session.commit()
+    db.session.add(p)
+    db.session.commit()
     return jsonify({"ok": True, "username": username}), 201
 
-@app.post("/api/login")
+@app.route("/api/login", methods=["POST"])
 def login():
     data     = request.get_json(force=True) or {}
     username = (data.get("username") or "").strip()
@@ -173,34 +190,40 @@ def login():
     return jsonify({"ok": True, "token": p.token, "username": p.username})
 
 # ─── Scores ───────────────────────────────────────────────────────────────────
-@app.post("/api/score")
+@app.route("/api/score", methods=["POST"])
 @require_auth
 def submit_score():
     data = request.get_json(force=True) or {}
     try:
-        score_val  = int(data.get("score",      0))
-        wave       = int(data.get("wave",        0))
-        level      = int(data.get("level",       1))
-        kills      = int(data.get("kills",       0))
-        boss_kills = int(data.get("boss_kills",  0))
+        score_val  = int(data.get("score",     0))
+        wave       = int(data.get("wave",       0))
+        level      = int(data.get("level",      1))
+        kills      = int(data.get("kills",      0))
+        boss_kills = int(data.get("boss_kills", 0))
         weapon     = str(data.get("weapon", "unknown"))[:20]
-        supercoins = int(data.get("supercoins",  0))
+        supercoins = int(data.get("supercoins", 0))
     except (TypeError, ValueError):
         return jsonify({"error": "Invalid data types"}), 400
 
     s = Score(
-        player_id=g.player.id, username=g.player.username,
-        score=score_val, wave=wave, level=level, kills=kills,
-        boss_kills=boss_kills, weapon=weapon, supercoins=supercoins,
+        player_id  = g.player.id,
+        username   = g.player.username,
+        score      = score_val,
+        wave       = wave,
+        level      = level,
+        kills      = kills,
+        boss_kills = boss_kills,
+        weapon     = weapon,
+        supercoins = supercoins,
     )
     db.session.add(s)
     _trim_scores(g.player.id)
     db.session.commit()
 
-    rank = db.session.query(Score).filter(Score.score > score_val)\
+    rank = db.session.query(Score)\
+             .filter(Score.score > score_val)\
              .distinct(Score.player_id).count() + 1
 
-    # ── Push live update to all open leaderboard pages ──
     _sse_broadcast("score", json.dumps({
         "username": g.player.username,
         "score":    score_val,
@@ -211,7 +234,7 @@ def submit_score():
 
     return jsonify({"ok": True, "score_id": s.id, "rank": rank})
 
-@app.get("/api/leaderboard")
+@app.route("/api/leaderboard", methods=["GET"])
 def api_leaderboard():
     page     = max(1, int(request.args.get("page", 1)))
     per_page = app.config["LEADERBOARD_PAGE_SIZE"]
@@ -225,10 +248,12 @@ def api_leaderboard():
     ).group_by(Score.username).subquery()
 
     q = db.session.query(Score).join(
-        sub, (Score.username == sub.c.username) & (Score.score == sub.c.best_score)
+        sub,
+        (Score.username == sub.c.username) & (Score.score == sub.c.best_score)
     )
     if weapon:
         q = q.filter(Score.weapon == weapon)
+
     total = q.count()
     rows  = q.order_by(Score.score.desc()).offset(offset).limit(per_page).all()
 
@@ -240,20 +265,13 @@ def api_leaderboard():
     })
 
 # ─── SSE live stream ──────────────────────────────────────────────────────────
-@app.get("/api/leaderboard/stream")
+@app.route("/api/leaderboard/stream", methods=["GET"])
 def leaderboard_stream():
-    """
-    Server-Sent Events endpoint.
-    Clients subscribe here and receive a 'score' event whenever someone
-    submits a new score, plus a heartbeat 'ping' every 30 s to keep the
-    connection alive through proxies.
-    """
     q = queue.Queue(maxsize=20)
     with _sse_lock:
         _sse_listeners.append(q)
 
     def generate():
-        # Send initial connection confirmation
         yield "event: connected\ndata: ok\n\n"
         try:
             while True:
@@ -261,7 +279,6 @@ def leaderboard_stream():
                     msg = q.get(timeout=30)
                     yield msg
                 except queue.Empty:
-                    # Heartbeat keeps connection alive
                     yield "event: ping\ndata: keepalive\n\n"
         except GeneratorExit:
             pass
@@ -274,23 +291,26 @@ def leaderboard_stream():
         stream_with_context(generate()),
         mimetype="text/event-stream",
         headers={
-            "Cache-Control":   "no-cache",
-            "X-Accel-Buffering": "no",   # disable nginx buffering
-            "Connection":      "keep-alive",
+            "Cache-Control":     "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection":        "keep-alive",
         }
     )
 
-@app.get("/api/profile/<username>")
+@app.route("/api/profile/<username>", methods=["GET"])
 def api_profile(username):
     p = Player.query.filter_by(username=username).first_or_404()
     if p.banned:
         return jsonify({"error": "Player not found"}), 404
     scores = Score.query.filter_by(player_id=p.id)\
                   .order_by(Score.score.desc()).limit(10).all()
-    return jsonify({"player": p.to_dict(), "recent_scores": [s.to_dict() for s in scores]})
+    return jsonify({
+        "player":        p.to_dict(),
+        "recent_scores": [s.to_dict() for s in scores],
+    })
 
 # ─── Cloud save sync ──────────────────────────────────────────────────────────
-@app.get("/api/sync/<username>")
+@app.route("/api/sync/<username>", methods=["GET"])
 @require_auth
 def sync_pull(username):
     if g.player.username != username:
@@ -301,7 +321,7 @@ def sync_pull(username):
         data = {}
     return jsonify({"save": data})
 
-@app.post("/api/sync/<username>")
+@app.route("/api/sync/<username>", methods=["POST"])
 @require_auth
 def sync_push(username):
     if g.player.username != username:
@@ -318,7 +338,7 @@ def sync_push(username):
     return jsonify({"ok": True})
 
 # ─── Admin ────────────────────────────────────────────────────────────────────
-@app.get("/api/admin/stats")
+@app.route("/api/admin/stats", methods=["GET"])
 @require_admin
 def admin_stats():
     from sqlalchemy import func
@@ -330,15 +350,15 @@ def admin_stats():
     weapon_counts = db.session.query(Score.weapon, func.count(Score.id))\
                               .group_by(Score.weapon).all()
     return jsonify({
-        "total_players":    total_players,
-        "total_scores":     total_scores,
-        "total_banned":     total_banned,
-        "top_score":        top_score,
-        "recent_runs":      [r.to_dict() for r in recent_runs],
+        "total_players":     total_players,
+        "total_scores":      total_scores,
+        "total_banned":      total_banned,
+        "top_score":         top_score,
+        "recent_runs":       [r.to_dict() for r in recent_runs],
         "weapon_popularity": {w: c for w, c in weapon_counts},
     })
 
-@app.get("/api/admin/players")
+@app.route("/api/admin/players", methods=["GET"])
 @require_admin
 def admin_players():
     page  = max(1, int(request.args.get("page", 1)))
@@ -346,21 +366,26 @@ def admin_players():
     per   = 30
     query = Player.query
     if q:
-        query = query.filter(Player.username.ilike(f"%{q}%"))
+        query = query.filter(Player.username.ilike("%" + q + "%"))
     total   = query.count()
     players = query.order_by(Player.created_at.desc())\
-                   .offset((page-1)*per).limit(per).all()
-    return jsonify({"total": total, "page": page, "players": [p.to_dict() for p in players]})
+                   .offset((page - 1) * per).limit(per).all()
+    return jsonify({
+        "total":   total,
+        "page":    page,
+        "players": [p.to_dict() for p in players],
+    })
 
-@app.delete("/api/admin/score/<int:score_id>")
+@app.route("/api/admin/score/<int:score_id>", methods=["DELETE"])
 @require_admin
 def admin_delete_score(score_id):
     s = Score.query.get_or_404(score_id)
-    db.session.delete(s); db.session.commit()
+    db.session.delete(s)
+    db.session.commit()
     _sse_broadcast("refresh", "deleted")
     return jsonify({"ok": True, "deleted": score_id})
 
-@app.post("/api/admin/ban/<username>")
+@app.route("/api/admin/ban/<username>", methods=["POST"])
 @require_admin
 def admin_ban(username):
     p = Player.query.filter_by(username=username).first_or_404()
@@ -369,7 +394,7 @@ def admin_ban(username):
     action = "banned" if p.banned else "unbanned"
     return jsonify({"ok": True, "username": username, "action": action, "banned": p.banned})
 
-@app.post("/api/admin/reset_saves")
+@app.route("/api/admin/reset_saves", methods=["POST"])
 @require_admin
 def admin_reset_saves():
     Player.query.update({"cloud_save": "{}"})
@@ -377,26 +402,44 @@ def admin_reset_saves():
     return jsonify({"ok": True, "message": "All cloud saves reset"})
 
 # ─── HTML pages ───────────────────────────────────────────────────────────────
-@app.get("/")
+@app.route("/")
 def index():
     return render_template("index.html")
 
-@app.get("/leaderboard")
+@app.route("/leaderboard")
 def leaderboard_page():
     return render_template("leaderboard.html")
 
-@app.get("/admin")
+@app.route("/admin")
 def admin_page():
     return render_template("admin.html")
 
-@app.get("/game")
+@app.route("/game")
 def game_page():
     return render_template("game.html")
+
+# ─── Serve pygbag WASM game files ─────────────────────────────────────────────
+# pygbag builds to build/web/ — copy those files to static/game/
+# then Flask serves them at /game/play/...
+GAME_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "game")
+
+@app.route("/game/play")
+@app.route("/game/play/")
+def game_play_index():
+    if not os.path.isdir(GAME_DIR) or not os.path.exists(os.path.join(GAME_DIR, "index.html")):
+        return """<!DOCTYPE html><html><body style="background:#0a0a12;color:#fff;font-family:monospace;text-align:center;padding:4rem">
+        <h2 style="color:#dc3232">Game not built yet</h2>
+        <p style="color:#969696">Run <code style="color:#50c8ff">build_browser_windows.bat</code> first, then restart the server.</p>
+        </body></html>""", 404
+    return send_from_directory(GAME_DIR, "index.html")
+
+@app.route("/game/play/<path:filename>")
+def game_play_files(filename):
+    return send_from_directory(GAME_DIR, filename)
 
 # ─── Init ─────────────────────────────────────────────────────────────────────
 with app.app_context():
     db.create_all()
 
 if __name__ == "__main__":
-    # ── Threading is required for SSE to work correctly ──
     app.run(debug=False, host="0.0.0.0", port=5000, threaded=True)
