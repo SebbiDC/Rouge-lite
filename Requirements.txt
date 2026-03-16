@@ -1,0 +1,16 @@
+# ─── Horde Survivor v3 — Full Requirements ────────────────────────────────────
+# Install everything:   pip install -r requirements.txt
+# Game only:            pip install -r requirements.txt --ignore-requires-python
+# Python 3.9+ required
+
+# ── Game (pygame) ─────────────────────────────────────────────────────────────
+pygame>=2.5.0
+
+# ── Flask server ──────────────────────────────────────────────────────────────
+flask>=3.0.0
+flask-sqlalchemy>=3.1.0
+flask-cors>=4.0.0
+
+# ── Production WSGI servers (pick one when deploying) ─────────────────────────
+gunicorn>=21.0.0        ; sys_platform != "win32"   # Linux / Mac production
+waitress>=3.0.0         ; sys_platform == "win32"   # Windows production

@@ -1,0 +1,19 @@
+{
+  "supercoins": 53,
+  "meta_upgrades": {
+    "m_xp": 6,
+    "m_hp": 8
+  },
+  "super_tier_unlocked": {},
+  "super_tier_levels": {},
+  "total_runs": 2,
+  "total_kills": 511,
+  "best_wave": 11,
+  "seen_structures": [
+    "shrine_xp",
+    "shrine_hp"
+  ],
+  "seen_events": [
+    "ev_gold_rush"
+  ]
+}
