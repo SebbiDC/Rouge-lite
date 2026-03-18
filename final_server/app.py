@@ -435,7 +435,20 @@ def game_play_index():
 
 @app.route("/game/play/<path:filename>")
 def game_play_files(filename):
-    return send_from_directory(GAME_DIR, filename)
+    resp = send_from_directory(GAME_DIR, filename)
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    resp.headers["Pragma"] = "no-cache"
+    return resp
+
+# pygbag's index.html fetches assets as relative URLs (e.g. rouge.lite.tar.gz)
+# from whatever path it was served at. Since the page loads at /game/play,
+# the browser requests them at /game/<filename> — so we catch that here.
+@app.route("/game/<path:filename>")
+def game_assets(filename):
+    resp = send_from_directory(GAME_DIR, filename)
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    resp.headers["Pragma"] = "no-cache"
+    return resp
 
 # ─── Init ─────────────────────────────────────────────────────────────────────
 with app.app_context():
