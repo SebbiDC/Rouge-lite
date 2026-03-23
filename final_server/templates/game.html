@@ -30,23 +30,59 @@
   transition: opacity .5s;
 }
 .game-loading.hidden { opacity: 0; pointer-events: none; }
+
 .loader-title {
   font-family: var(--font-display); font-size: 2rem; font-weight: 900;
   color: var(--player); text-shadow: 0 0 40px var(--glow-player);
-  margin-bottom: 1.5rem; letter-spacing: 3px;
+  margin-bottom: 2rem; letter-spacing: 3px;
 }
+
+.stages {
+  display: flex; flex-direction: column; gap: .6rem;
+  width: 360px; margin-bottom: 1.5rem;
+}
+.stage {
+  display: flex; align-items: center; gap: .75rem;
+  font-size: .78rem; letter-spacing: 1px; color: var(--gray);
+  transition: color .3s;
+}
+.stage.done  { color: var(--xp); }
+.stage.active { color: var(--player); }
+.stage-icon {
+  width: 18px; height: 18px; border-radius: 50%;
+  border: 2px solid currentColor;
+  display: flex; align-items: center; justify-content: center;
+  font-size: .65rem; flex-shrink: 0;
+  transition: background .3s, border-color .3s;
+}
+.stage.done .stage-icon  { background: var(--xp); border-color: var(--xp); }
+.stage.active .stage-icon { border-color: var(--player); animation: pulse 1s infinite; }
+
+@keyframes pulse {
+  0%,100% { box-shadow: 0 0 0 0 rgba(80,200,255,.4); }
+  50%      { box-shadow: 0 0 0 6px rgba(80,200,255,0); }
+}
+
 .progress-track {
-  width: 320px; height: 6px;
+  width: 360px; height: 6px;
   background: rgba(255,255,255,.08);
   border-radius: 3px; overflow: hidden; margin-bottom: .75rem;
 }
 .progress-fill {
   height: 100%; border-radius: 3px;
   background: var(--player); width: 0%;
-  transition: width .4s ease;
+  transition: width .5s ease;
   box-shadow: 0 0 12px var(--glow-player);
 }
-.loader-status { font-size: .75rem; color: var(--gray); letter-spacing: 1px; }
+.loader-status {
+  font-size: .72rem; color: var(--gray);
+  letter-spacing: 1px; height: 1.2em;
+}
+.loader-tip {
+  margin-top: 1.5rem; font-size: .7rem;
+  color: rgba(150,150,150,.5); max-width: 340px;
+  text-align: center; line-height: 1.6;
+}
 
 .fs-btn {
   position: absolute; top: .75rem; right: .75rem; z-index: 20;
@@ -93,10 +129,35 @@
   <div class="game-wrap" id="game-wrap">
     <div class="game-loading" id="game-loading">
       <div class="loader-title">HORDE SURVIVOR</div>
+
+      <div class="stages">
+        <div class="stage active" id="stage-runtime">
+          <div class="stage-icon">1</div>
+          <span>Loading WebAssembly runtime</span>
+        </div>
+        <div class="stage" id="stage-python">
+          <div class="stage-icon">2</div>
+          <span>Starting Python interpreter</span>
+        </div>
+        <div class="stage" id="stage-assets">
+          <div class="stage-icon">3</div>
+          <span>Downloading game assets</span>
+        </div>
+        <div class="stage" id="stage-init">
+          <div class="stage-icon">4</div>
+          <span>Initialising pygame</span>
+        </div>
+        <div class="stage" id="stage-ready">
+          <div class="stage-icon">5</div>
+          <span>Launching game</span>
+        </div>
+      </div>
+
       <div class="progress-track">
         <div class="progress-fill" id="load-bar"></div>
       </div>
-      <div class="loader-status" id="load-status">Loading WebAssembly runtime…</div>
+      <div class="loader-status" id="load-status">Connecting…</div>
+      <div class="loader-tip">First load downloads ~10MB of WebAssembly — subsequent loads are much faster.</div>
     </div>
 
     <button class="fs-btn" onclick="toggleFullscreen()">⛶ Fullscreen</button>
@@ -120,48 +181,85 @@
 
 {% block scripts %}
 <script>
-const bar    = document.getElementById('load-bar');
-const status = document.getElementById('load-status');
-const overlay= document.getElementById('game-loading');
-const frame  = document.getElementById('game-frame');
+const bar     = document.getElementById('load-bar');
+const status  = document.getElementById('load-status');
+const overlay = document.getElementById('game-loading');
+const frame   = document.getElementById('game-frame');
 
-const msgs = [
-  'Loading WebAssembly runtime…',
-  'Initialising pygame…',
-  'Loading game assets…',
-  'Spawning first wave…',
-  'Get ready…',
+const stages = {
+  runtime: document.getElementById('stage-runtime'),
+  python:  document.getElementById('stage-python'),
+  assets:  document.getElementById('stage-assets'),
+  init:    document.getElementById('stage-init'),
+  ready:   document.getElementById('stage-ready'),
+};
+
+const order = ['runtime','python','assets','init','ready'];
+let currentPct = 0;
+
+function setStage(name, pct, msg) {
+  const idx = order.indexOf(name);
+  order.forEach((s, i) => {
+    stages[s].classList.remove('active','done');
+    if (i < idx)  stages[s].classList.add('done');
+    if (i === idx) stages[s].classList.add('active');
+  });
+  currentPct = Math.max(currentPct, pct);
+  bar.style.width = currentPct + '%';
+  if (msg) status.textContent = msg;
+}
+
+function allDone() {
+  order.forEach(s => { stages[s].classList.remove('active'); stages[s].classList.add('done'); });
+  bar.style.width = '100%';
+  status.textContent = 'Ready!';
+  setTimeout(() => overlay.classList.add('hidden'), 800);
+}
+
+// Timed fallback so the progress never looks completely frozen
+const TIMELINE = [
+  { at: 800,   stage: 'runtime', pct: 10, msg: 'Loading WebAssembly runtime…' },
+  { at: 2500,  stage: 'runtime', pct: 25, msg: 'Compiling WebAssembly…' },
+  { at: 5000,  stage: 'python',  pct: 38, msg: 'Starting Python interpreter…' },
+  { at: 8000,  stage: 'assets',  pct: 55, msg: 'Downloading game assets…' },
+  { at: 12000, stage: 'assets',  pct: 68, msg: 'Unpacking game files…' },
+  { at: 18000, stage: 'init',    pct: 80, msg: 'Initialising pygame…' },
+  { at: 25000, stage: 'ready',   pct: 92, msg: 'Almost there…' },
 ];
+TIMELINE.forEach(({ at, stage, pct, msg }) => {
+  setTimeout(() => setStage(stage, pct, msg), at);
+});
 
-// Animate the loading bar while the iframe loads
-let pct = 0;
-const fakeProgress = setInterval(() => {
-  pct = Math.min(90, pct + Math.random() * 8 + 2);
-  bar.style.width = pct + '%';
-  status.textContent = msgs[Math.min(Math.floor(pct / 20), msgs.length - 1)];
-}, 700);
-
-// Load the game — points to Flask route that serves static/game/index.html
+setStage('runtime', 5, 'Connecting to game server…');
 frame.src = '/game/play';
 
 frame.onload = () => {
-  clearInterval(fakeProgress);
-  bar.style.width = '100%';
-  status.textContent = 'Ready!';
-  setTimeout(() => overlay.classList.add('hidden'), 600);
+  setStage('init', 78, 'Pygame loading…');
+
+  // Poll the iframe canvas — once it has content the game is running
+  let checks = 0;
+  const poll = setInterval(() => {
+    checks++;
+    try {
+      const doc = frame.contentDocument || frame.contentWindow.document;
+      const canvas = doc && doc.getElementById('canvas');
+      if (canvas && canvas.width > 1) { clearInterval(poll); allDone(); }
+    } catch(e) { /* cross-origin */ }
+    if (checks > 120) { clearInterval(poll); allDone(); }
+  }, 500);
 };
 
 frame.onerror = () => {
-  clearInterval(fakeProgress);
   overlay.innerHTML = `
     <div style="text-align:center;padding:2rem;">
-      <div style="font-size:2rem;margin-bottom:1rem;">🎮</div>
+      <div style="font-size:2rem;margin-bottom:1rem;">⚠</div>
       <div style="font-family:var(--font-display);font-size:1.1rem;color:var(--hp);margin-bottom:1rem;">
         GAME NOT BUILT YET
       </div>
       <p style="color:var(--gray);font-size:.85rem;line-height:1.8;max-width:400px;">
-        Run <code style="color:var(--player);">build_browser_windows.bat</code>
-        in your project folder, then restart the server.
+        Run <code style="color:var(--player);">python make_async.py</code> then
+        <code style="color:var(--player);">python build_after_patch.py</code>
+        in the Rouge lite folder, then restart the server.
       </p>
     </div>`;
 };
