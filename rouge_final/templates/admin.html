@@ -137,6 +137,7 @@
     <button class="admin-tab active" onclick="showTab('overview')">Overview</button>
     <button class="admin-tab" onclick="showTab('players')">Players</button>
     <button class="admin-tab" onclick="showTab('scores')">Scores</button>
+    <button class="admin-tab" onclick="showTab('updates')">🚀 Updates</button>
     <button class="admin-tab" onclick="showTab('danger')">⚠ Danger Zone</button>
   </div>
 
@@ -206,6 +207,64 @@
           <tr><td colspan="7" class="loading-state" style="padding:2rem; text-align:center; color:var(--gray);">Loading…</td></tr>
         </tbody>
       </table>
+    </div>
+  </div>
+
+  <!-- Updates panel -->
+  <div class="tab-panel" id="tab-updates">
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; max-width:900px;">
+
+      <div class="card" style="border-color:rgba(60,255,120,.25);">
+        <h3 class="text-xp mb-2">📦 Current Version</h3>
+        <div id="ver-info" style="color:var(--gray); font-size:.85rem; line-height:2;">Loading…</div>
+        <div style="margin-top:1rem; display:flex; gap:.75rem; flex-wrap:wrap;">
+          <a id="dl-win-link" href="#" class="btn btn-sm btn-primary" style="display:none;">⬇ Windows</a>
+          <a id="dl-lin-link" href="#" class="btn btn-sm btn-primary" style="display:none;">⬇ Linux</a>
+        </div>
+      </div>
+
+      <div class="card" style="border-color:rgba(80,200,255,.25);">
+        <h3 class="text-player mb-2">✏️ Update Metadata</h3>
+        <div class="form-group" style="margin-bottom:.75rem;">
+          <label style="display:block; font-size:.72rem; color:var(--gray); letter-spacing:1px; margin-bottom:.35rem;">VERSION STRING</label>
+          <input type="text" id="upd-version" placeholder="e.g. 1.0.0" class="w-full">
+        </div>
+        <div class="form-group" style="margin-bottom:.75rem;">
+          <label style="display:block; font-size:.72rem; color:var(--gray); letter-spacing:1px; margin-bottom:.35rem;">RELEASE NOTES</label>
+          <textarea id="upd-notes" rows="4" placeholder="What changed in this version…"
+            style="background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.12); border-radius:var(--radius); color:var(--white); font-family:var(--font-mono); padding:.5rem .9rem; font-size:.82rem; outline:none; width:100%; resize:vertical; transition:border-color .2s;"
+            onfocus="this.style.borderColor=&apos;var(--player)&apos;" onblur="this.style.borderColor=&apos;rgba(255,255,255,.12)&apos;"></textarea>
+        </div>
+        <div style="display:flex; align-items:center; gap:.75rem; margin-bottom:1rem;">
+          <input type="checkbox" id="upd-force" style="width:16px;height:16px;accent-color:var(--hp);">
+          <label for="upd-force" style="font-size:.82rem; color:var(--gray); cursor:pointer;">Force update <span style="color:var(--hp);">(block play until updated)</span></label>
+        </div>
+        <button class="btn btn-primary" onclick="saveMetadata()">Save Metadata</button>
+      </div>
+
+      <div class="card" style="grid-column:1/-1; border-color:rgba(255,215,0,.25);">
+        <h3 class="text-coin mb-2">🚀 Upload New Build</h3>
+        <p style="color:var(--gray); font-size:.82rem; margin-bottom:1.25rem;">
+          Uploading a new build automatically updates the download links. All players receive the update on their next launch.
+        </p>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1rem;">
+          <div>
+            <label style="display:block; font-size:.72rem; color:var(--gray); letter-spacing:1px; margin-bottom:.5rem;">WINDOWS BUILD (.apk / .exe / .zip)</label>
+            <input type="file" id="file-win" accept=".apk,.exe,.zip"
+              style="background:rgba(255,255,255,.04); border:1px dashed rgba(255,215,0,.3); border-radius:var(--radius); color:var(--gray); font-family:var(--font-mono); padding:.5rem .75rem; font-size:.8rem; width:100%; cursor:pointer;">
+          </div>
+          <div>
+            <label style="display:block; font-size:.72rem; color:var(--gray); letter-spacing:1px; margin-bottom:.5rem;">LINUX BUILD (.tar.gz / .AppImage)</label>
+            <input type="file" id="file-lin" accept=".gz,.AppImage,.tar"
+              style="background:rgba(255,255,255,.04); border:1px dashed rgba(255,215,0,.3); border-radius:var(--radius); color:var(--gray); font-family:var(--font-mono); padding:.5rem .75rem; font-size:.8rem; width:100%; cursor:pointer;">
+          </div>
+        </div>
+        <div style="display:flex; gap:1rem; align-items:center; flex-wrap:wrap;">
+          <button class="btn btn-coin" onclick="uploadBuild()">🚀 Upload & Publish</button>
+          <div id="upload-progress" style="font-size:.8rem; color:var(--gray); display:none;">Uploading…</div>
+        </div>
+      </div>
+
     </div>
   </div>
 
@@ -421,7 +480,7 @@ async function confirmReset(type) {
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 function showTab(name) {
   document.querySelectorAll('.admin-tab').forEach((t,i) => {
-    const names = ['overview','players','scores','danger'];
+    const names = ['overview','players','scores','updates','danger'];
     t.classList.toggle('active', names[i] === name);
   });
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
@@ -429,6 +488,94 @@ function showTab(name) {
 
   if (name === 'players') loadPlayers(1);
   if (name === 'scores')  loadScores();
+  if (name === 'updates') loadVersionInfo();
+}
+
+// ── Updates panel ─────────────────────────────────────────────────────────────
+async function loadVersionInfo() {
+  try {
+    const r = await fetch('/api/version');
+    const v = await r.json();
+    const base = location.origin;
+    document.getElementById('ver-info').innerHTML =
+      '<strong style="color:var(--white)">Version:</strong> v' + v.version + '<br>' +
+      '<strong style="color:var(--white)">Notes:</strong> ' + (v.notes || '—') + '<br>' +
+      '<strong style="color:var(--white)">Force Update:</strong> ' +
+        (v.force_update ? '<span style="color:var(--hp)">YES</span>' : '<span style="color:var(--xp)">No</span>') + '<br>' +
+      '<strong style="color:var(--white)">Windows:</strong> ' + (v.windows_file || '—') + '<br>' +
+      '<strong style="color:var(--white)">Linux:</strong> ' + (v.linux_file || '—');
+
+    if (v.windows_url) {
+      const a = document.getElementById('dl-win-link');
+      a.href = v.windows_url; a.style.display = 'inline-flex';
+    }
+    if (v.linux_url) {
+      const a = document.getElementById('dl-lin-link');
+      a.href = v.linux_url; a.style.display = 'inline-flex';
+    }
+    // Pre-fill form
+    document.getElementById('upd-version').value = v.version || '';
+    document.getElementById('upd-notes').value   = v.notes   || '';
+    document.getElementById('upd-force').checked = !!v.force_update;
+  } catch(e) {
+    document.getElementById('ver-info').textContent = 'Could not load version info.';
+  }
+}
+
+async function saveMetadata() {
+  const payload = {
+    version:      document.getElementById('upd-version').value.trim(),
+    notes:        document.getElementById('upd-notes').value.trim(),
+    force_update: document.getElementById('upd-force').checked,
+  };
+  try {
+    const r = await adminFetch('/api/admin/update_version', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const d = await r.json();
+    if (d.ok) { toast('Version metadata saved!', 'ok'); loadVersionInfo(); }
+    else       { toast(d.error || 'Error', 'error'); }
+  } catch(e) { toast('Server error', 'error'); }
+}
+
+async function uploadBuild() {
+  const winFile = document.getElementById('file-win').files[0];
+  const linFile = document.getElementById('file-lin').files[0];
+  if (!winFile && !linFile) { toast('Select at least one build file', 'error'); return; }
+
+  const fd = new FormData();
+  if (winFile) fd.append('windows_build', winFile);
+  if (linFile) fd.append('linux_build',   linFile);
+
+  const ver   = document.getElementById('upd-version').value.trim();
+  const notes = document.getElementById('upd-notes').value.trim();
+  const force = document.getElementById('upd-force').checked;
+  if (ver)   fd.append('version', ver);
+  if (notes) fd.append('notes',   notes);
+  fd.append('force_update', force ? 'true' : 'false');
+
+  const prog = document.getElementById('upload-progress');
+  prog.style.display = 'block';
+  prog.textContent   = 'Uploading…';
+
+  try {
+    const r = await adminFetch('/api/admin/upload_build', { method: 'POST', body: fd });
+    const d = await r.json();
+    prog.style.display = 'none';
+    if (d.ok) {
+      toast('Build uploaded! v' + d.version.version + ' is now live.', 'ok');
+      document.getElementById('file-win').value = '';
+      document.getElementById('file-lin').value = '';
+      loadVersionInfo();
+    } else {
+      toast(d.error || 'Upload failed', 'error');
+    }
+  } catch(e) {
+    prog.style.display = 'none';
+    toast('Upload error: ' + e.message, 'error');
+  }
 }
 
 // ── Auto-login from session ───────────────────────────────────────────────────

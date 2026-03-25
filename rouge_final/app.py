@@ -44,7 +44,7 @@ app.config.update(
     SECRET_KEY = os.environ.get("SECRET_KEY", secrets.token_hex(32)),
     SQLALCHEMY_DATABASE_URI = "sqlite:///" + os.path.join(app.instance_path, "horde.db"),
     SQLALCHEMY_TRACK_MODIFICATIONS = False,
-    ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "changeme_admin_secret"),
+    ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "CD"),
     MAX_SCORES_PER_PLAYER = 10,
     LEADERBOARD_PAGE_SIZE = 50,
 )
@@ -418,10 +418,123 @@ def admin_page():
 def game_page():
     return render_template("game.html")
 
+# ─── Update system ────────────────────────────────────────────────────────────
+# version.json lives next to app.py and holds the current release info.
+# Clients poll /api/version to check for updates, then download from /download/<file>
+VERSION_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.json")
+GAME_DIR     = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "game")
+
+def _load_version():
+    """Load version.json, creating a default if missing."""
+    if os.path.exists(VERSION_FILE):
+        with open(VERSION_FILE) as f:
+            return json.load(f)
+    # Bootstrap from build/version.txt if present (adjacent to final_server)
+    build_txt = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "..", "build", "version.txt")
+    ver = "0.9.3"
+    if os.path.exists(build_txt):
+        ver = open(build_txt).read().strip()
+    default = {
+        "version":      ver,
+        "notes":        "Latest release",
+        "windows_file": "rouge.lite.apk",
+        "linux_file":   "rouge.lite.tar.gz",
+        "force_update": False,
+        "updated_at":   time.time(),
+    }
+    with open(VERSION_FILE, "w") as f:
+        json.dump(default, f, indent=2)
+    return default
+
+@app.route("/api/version")
+def api_version():
+    """Public endpoint — clients poll this to check for updates."""
+    v = _load_version()
+    # Attach direct download URLs
+    base = request.host_url.rstrip("/")
+    v["windows_url"] = base + "/download/" + v.get("windows_file", "")
+    v["linux_url"]   = base + "/download/" + v.get("linux_file",   "")
+    return jsonify(v)
+
+@app.route("/download/<path:filename>")
+def download_file(filename):
+    """Serve game binaries from static/game/ as forced downloads."""
+    safe = os.path.basename(filename)   # never allow path traversal
+    fpath = os.path.join(GAME_DIR, safe)
+    if not os.path.exists(fpath):
+        return jsonify({"error": "File not found. Ask the admin to upload a build."}), 404
+    return send_from_directory(GAME_DIR, safe, as_attachment=True)
+
+@app.route("/api/admin/update_version", methods=["POST"])
+@require_admin
+def admin_update_version():
+    """
+    Admin endpoint — update the version metadata.
+    Accepts JSON: { version, notes, force_update }
+    Optionally accepts multipart form with files:  windows_build, linux_build
+    """
+    # JSON body?
+    data = request.get_json(force=True, silent=True) or {}
+
+    ver          = str(data.get("version", "")).strip()
+    notes        = str(data.get("notes",   "")).strip()
+    force_update = bool(data.get("force_update", False))
+
+    v = _load_version()
+    if ver:   v["version"]      = ver
+    if notes: v["notes"]        = notes
+    v["force_update"] = force_update
+    v["updated_at"]   = time.time()
+
+    with open(VERSION_FILE, "w") as f:
+        json.dump(v, f, indent=2)
+
+    return jsonify({"ok": True, "version": v})
+
+@app.route("/api/admin/upload_build", methods=["POST"])
+@require_admin
+def admin_upload_build():
+    """
+    Upload new game binaries.  Multipart form fields:
+      windows_build  — the .apk / .exe
+      linux_build    — the .tar.gz
+      version        — new version string (optional)
+      notes          — changelog (optional)
+      force_update   — "true"/"false"
+    """
+    os.makedirs(GAME_DIR, exist_ok=True)
+    saved = []
+
+    for field, key in [("windows_build", "windows_file"), ("linux_build", "linux_file")]:
+        f = request.files.get(field)
+        if f and f.filename:
+            safe = os.path.basename(f.filename)
+            f.save(os.path.join(GAME_DIR, safe))
+            saved.append(safe)
+            v = _load_version()
+            v[key] = safe
+            with open(VERSION_FILE, "w") as vf:
+                json.dump(v, vf, indent=2)
+
+    # Update metadata fields if provided
+    ver   = request.form.get("version", "").strip()
+    notes = request.form.get("notes",   "").strip()
+    force = request.form.get("force_update", "false").lower() == "true"
+    v = _load_version()
+    if ver:   v["version"]      = ver
+    if notes: v["notes"]        = notes
+    v["force_update"] = force
+    v["updated_at"]   = time.time()
+    with open(VERSION_FILE, "w") as vf:
+        json.dump(v, vf, indent=2)
+
+    return jsonify({"ok": True, "saved_files": saved, "version": v})
+
+
 # ─── Serve pygbag WASM game files ─────────────────────────────────────────────
 # pygbag builds to build/web/ — copy those files to static/game/
 # then Flask serves them at /game/play/...
-GAME_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "game")
 
 @app.route("/game/play")
 @app.route("/game/play/")

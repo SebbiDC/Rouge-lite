@@ -1,0 +1,256 @@
+{% extends "base.html" %}
+{% block title %} — Download{% endblock %}
+
+{% block extra_head %}
+<style>
+.dl-hero {
+  text-align: center;
+  padding: 4rem 1rem 2.5rem;
+  position: relative;
+}
+.dl-hero-title {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 6vw, 4rem);
+  font-weight: 900;
+  color: var(--xp);
+  text-shadow: 0 0 60px var(--glow-xp), 0 0 120px rgba(60,255,120,.08);
+  letter-spacing: 4px;
+  line-height: 1;
+  margin-bottom: .5rem;
+}
+.dl-hero-sub {
+  color: var(--gray);
+  font-size: .85rem;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  margin-bottom: 2rem;
+}
+.version-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .35rem 1rem;
+  background: rgba(60,255,120,.08);
+  border: 1px solid rgba(60,255,120,.3);
+  border-radius: 99px;
+  font-size: .78rem;
+  color: var(--xp);
+  letter-spacing: 2px;
+  margin-bottom: 2rem;
+}
+.version-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--xp);
+  box-shadow: 0 0 8px var(--xp);
+  animation: blink 2s ease-in-out infinite;
+}
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+.dl-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  max-width: 800px;
+  margin: 0 auto 2rem;
+}
+@media(max-width: 640px) { .dl-grid { grid-template-columns: 1fr; } }
+
+.dl-card {
+  background: var(--dgray);
+  border: 1px solid rgba(255,255,255,.07);
+  border-radius: 16px;
+  padding: 2rem 1.5rem;
+  text-align: center;
+  transition: border-color .2s, box-shadow .2s;
+  position: relative;
+  overflow: hidden;
+}
+.dl-card::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: radial-gradient(ellipse at 50% 0%, rgba(60,255,120,.06) 0%, transparent 70%);
+  pointer-events: none;
+}
+.dl-card:hover { border-color: rgba(60,255,120,.4); box-shadow: 0 0 40px rgba(60,255,120,.08); }
+.dl-card .platform-icon { font-size: 3rem; margin-bottom: 1rem; display: block; }
+.dl-card .platform-name { font-family: var(--font-display); font-size: 1.1rem; font-weight: 700; color: var(--white); margin-bottom: .3rem; }
+.dl-card .platform-ext { font-size: .75rem; color: var(--gray); letter-spacing: 2px; margin-bottom: 1.5rem; }
+
+.btn-download {
+  display: inline-flex; align-items: center; gap: .6rem;
+  padding: .7rem 1.8rem;
+  font-family: var(--font-mono);
+  font-size: .9rem; letter-spacing: 1px;
+  border: 2px solid var(--xp); border-radius: var(--radius);
+  color: var(--xp); background: transparent;
+  cursor: pointer; text-decoration: none;
+  text-transform: uppercase;
+  transition: all .15s;
+  width: 100%; justify-content: center;
+}
+.btn-download:hover { background: rgba(60,255,120,.1); box-shadow: 0 0 24px var(--glow-xp); transform: translateY(-2px); }
+.btn-download:active { transform: translateY(0); }
+.btn-download.disabled { border-color: var(--gray); color: var(--gray); cursor: not-allowed; pointer-events: none; }
+
+.changelog-card {
+  max-width: 800px; margin: 0 auto 2rem;
+  background: var(--dgray);
+  border: 1px solid rgba(80,200,255,.2);
+  border-radius: 12px;
+  padding: 1.5rem;
+}
+.changelog-card h3 { color: var(--player); margin-bottom: 1rem; font-size: .9rem; letter-spacing: 2px; text-transform: uppercase; }
+.changelog-body { color: var(--gray); font-size: .85rem; line-height: 1.8; white-space: pre-wrap; min-height: 3em; }
+
+.update-banner {
+  display: none;
+  max-width: 800px; margin: 0 auto 1.5rem;
+  background: rgba(255,215,0,.07);
+  border: 1px solid rgba(255,215,0,.4);
+  border-radius: 12px;
+  padding: 1rem 1.5rem;
+  color: var(--coin);
+  font-size: .85rem;
+  letter-spacing: 1px;
+  align-items: center; gap: 1rem;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.update-banner.visible { display: flex; }
+
+.updater-info {
+  max-width: 800px; margin: 0 auto 2rem;
+  background: rgba(80,200,255,.04);
+  border: 1px solid rgba(80,200,255,.15);
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem;
+}
+.updater-info h3 { color: var(--player); font-size: .85rem; letter-spacing: 2px; margin-bottom: .75rem; text-transform: uppercase; }
+.updater-steps { list-style: none; counter-reset: step; display: flex; flex-direction: column; gap: .5rem; }
+.updater-steps li {
+  counter-increment: step;
+  display: flex; align-items: flex-start; gap: .75rem;
+  font-size: .82rem; color: var(--gray);
+}
+.updater-steps li::before {
+  content: counter(step);
+  flex-shrink: 0;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--player);
+  color: var(--player);
+  font-size: .72rem;
+  display: flex; align-items: center; justify-content: center;
+  margin-top: 1px;
+}
+code { color: var(--bullet); background: rgba(255,255,255,.06); padding: .1em .4em; border-radius: 4px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dl-hero">
+  <h1 class="dl-hero-title">⬇ DOWNLOAD</h1>
+  <p class="dl-hero-sub">Get the game client — connect to the leaderboard server</p>
+  <div class="version-badge">
+    <span class="version-dot"></span>
+    <span id="cur-version">Loading…</span>
+  </div>
+</div>
+
+<div class="page-content" style="padding-top:0">
+
+  <div class="update-banner" id="update-banner">
+    <span>⚡ A new version is available — re-download to update!</span>
+    <span id="update-ver" style="font-family:var(--font-display); font-size:.9rem;"></span>
+  </div>
+
+  <div class="dl-grid">
+    <div class="dl-card">
+      <span class="platform-icon">🪟</span>
+      <div class="platform-name">Windows</div>
+      <div class="platform-ext" id="win-ext"></div>
+      <a class="btn-download disabled" id="btn-win" href="#">
+        <span>⬇</span> Download
+      </a>
+    </div>
+
+    <div class="dl-card">
+      <span class="platform-icon">🐧</span>
+      <div class="platform-name">Linux</div>
+      <div class="platform-ext" id="lin-ext"></div>
+      <a class="btn-download disabled" id="btn-lin" href="#">
+        <span>⬇</span> Download
+      </a>
+    </div>
+  </div>
+
+  <div class="changelog-card">
+    <h3>📋 Release Notes</h3>
+    <div class="changelog-body" id="changelog-body">Loading…</div>
+  </div>
+
+  <div class="updater-info">
+    <h3>🔄 Auto-update — how it works</h3>
+    <ul class="updater-steps">
+      <li>The game launcher calls <code>/api/version</code> on every startup.</li>
+      <li>If the server version differs from the locally saved version, the launcher downloads the new build automatically.</li>
+      <li>The updated game runs on the very next launch — no manual steps needed.</li>
+      <li>Admins push new builds from the <a href="/admin" style="color:var(--player);">Admin panel</a> — all connected clients update silently.</li>
+      <li>With <strong>Force Update</strong> enabled, players are blocked from playing until they have re-downloaded.</li>
+    </ul>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(async () => {
+  let serverVer = null;
+  try {
+    const r = await fetch('/api/version');
+    const v = await r.json();
+    serverVer = v.version;
+
+    document.getElementById('cur-version').textContent = 'v' + v.version;
+
+    if (v.windows_url && v.windows_file) {
+      const btn = document.getElementById('btn-win');
+      btn.href = v.windows_url;
+      btn.classList.remove('disabled');
+      const parts = v.windows_file.split('.');
+      document.getElementById('win-ext').textContent = parts.length > 1 ? '.' + parts.slice(1).join('.') : v.windows_file;
+    }
+
+    if (v.linux_url && v.linux_file) {
+      const btn = document.getElementById('btn-lin');
+      btn.href = v.linux_url;
+      btn.classList.remove('disabled');
+      const parts = v.linux_file.split('.');
+      document.getElementById('lin-ext').textContent = parts.length > 1 ? '.' + parts.slice(1).join('.') : v.linux_file;
+    }
+
+    document.getElementById('changelog-body').textContent = v.notes || 'No release notes.';
+
+    const localVer = localStorage.getItem('horde_game_version');
+    if (localVer && localVer !== v.version) {
+      document.getElementById('update-ver').textContent = 'v' + v.version;
+      document.getElementById('update-banner').classList.add('visible');
+    }
+
+    if (v.force_update) {
+      toast('⚡ A mandatory update is available — please re-download!', 'info', 8000);
+    }
+  } catch(e) {
+    document.getElementById('cur-version').textContent = 'Server offline';
+    document.getElementById('changelog-body').textContent = 'Could not reach server.';
+  }
+
+  document.querySelectorAll('.btn-download').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (serverVer) localStorage.setItem('horde_game_version', serverVer);
+    });
+  });
+})();
+</script>
+{% endblock %}
