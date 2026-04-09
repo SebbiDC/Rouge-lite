@@ -12,8 +12,8 @@ if not os.path.exists("main.py"):
     print("ERROR: main.py not found. Run make_async.py first!")
     input("Press Enter to exit..."); sys.exit(1)
 
-if not os.path.exists("final_server/app.py"):
-    print("ERROR: final_server/app.py not found")
+if not os.path.exists("rouge_final/app.py"):
+    print("ERROR: rouge_final/app.py not found")
     input("Press Enter to exit..."); sys.exit(1)
 
 # Step 1: Build with pygbag
@@ -29,12 +29,12 @@ if result.returncode != 0:
 
 # Step 2: Find output and copy
 print("\n[2/2] Looking for build output...")
-dest = os.path.join("final_server", "static", "game")
+dest = os.path.join("rouge_final", "static", "game")
 os.makedirs(dest, exist_ok=True)
 
 found = False
 for root, dirs, files in os.walk("."):
-    if "final_server" in root:
+    if "rouge_final" in root:
         continue
     if "index.html" in files:
         has_wasm = any(f.endswith('.wasm') or f.endswith('.js') or f.endswith('.tar.gz') for f in files)
@@ -58,7 +58,7 @@ for root, dirs, files in os.walk("."):
 
 if not found:
     print("\nBuild output not found!")
-    print("Try manually copying build/web/* to final_server/static/game/")
+    print("Try manually copying build/web/* to rouge_final/static/game/")
     input("\nPress Enter to exit..."); sys.exit(1)
 
 # Step 3: Remove pycache from the copied files
@@ -76,6 +76,6 @@ for f in os.listdir(dest):
     print(f"  {f}  ({size//1024}KB)")
 print("\nNEXT STEPS:")
 print("  1. Stop app.py (press Ctrl+C in its window)")
-print("  2. Run:  python final_server/app.py")
+print("  2. Run:  python rouge_final/app.py")
 print("  3. Open: http://localhost:5000/game")
 input("\nPress Enter to exit...")

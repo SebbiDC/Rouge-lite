@@ -5,11 +5,85 @@ Controls: WASD/Arrows=move | Q=special | E=interact | F=parry(sword)
           1/2/3 or CLICK = choose upgrade | TAB=card log | I=index
 """
 import pygame, math, random, sys, json, os
+import threading, urllib.request, urllib.error
+
+# ═══════ SERVER CONFIG ═════════════════════════════════════════════════════════
+# Set this to your server's address. Players can override via horde_server.txt
+_cfg_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "horde_server.txt")
+if os.path.exists(_cfg_file):
+    SERVER_URL = open(_cfg_file).read().strip().rstrip("/")
+else:
+    SERVER_URL = "http://10.2.0.191:5000"   # <-- change this to your server IP
+
+# Loaded from horde_account.json after login
+_account = {"username": None, "token": None}
+_account_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "horde_account.json")
+if os.path.exists(_account_file):
+    try:
+        _account.update(json.load(open(_account_file)))
+    except Exception:
+        pass
+
+def _api(path, data=None, method=None):
+    """Simple synchronous API helper. Returns parsed JSON or None on error."""
+    try:
+        url = SERVER_URL + path
+        body = json.dumps(data).encode() if data else None
+        req = urllib.request.Request(
+            url, data=body,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": "Bearer " + (_account.get("token") or ""),
+            },
+            method=method or ("POST" if body else "GET"),
+        )
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return json.loads(r.read().decode())
+    except Exception:
+        return None
+
+def submit_score_async(wave, level, kills, boss_kills, score, weapon_name):
+    """Fire-and-forget score submission — runs in background so game never freezes."""
+    if not _account.get("token"):
+        return
+    def _send():
+        _api("/api/score", {
+            "score":      score,
+            "wave":       wave,
+            "level":      level,
+            "kills":      kills,
+            "boss_kills": boss_kills,
+            "weapon":     weapon_name,
+        })
+    threading.Thread(target=_send, daemon=True).start()
+
+def login_to_server(username, password):
+    """Log in and save the token. Returns (True, message) or (False, error)."""
+    result = _api("/api/login", {"username": username, "password": password})
+    if result and result.get("ok"):
+        _account["username"] = result["username"]
+        _account["token"]    = result["token"]
+        try:
+            with open(_account_file, "w") as f:
+                json.dump(_account, f)
+        except Exception:
+            pass
+        return True, f"Logged in as {result['username']}"
+    return False, (result or {}).get("error", "Could not reach server")
+
+def logout_from_server():
+    _account["username"] = None
+    _account["token"] = None
+    try:
+        os.remove(_account_file)
+    except Exception:
+        pass
 
 W, H = 1280, 720
 FPS   = 60
 screen = None
 clock  = None
+dt    = 1.0   # delta-time multiplier: 1.0 = perfect 60 fps, scales movement so game speed is frame-rate independent
 
 SAVE_FILE = "horde_save.json"
 
@@ -164,7 +238,7 @@ class Particle:
         self.x,self.y=x,y; self.vx,self.vy=math.cos(a)*s,math.sin(a)*s
         self.life=self.ml=life; self.col=col; self.sz=sz
     def update(self):
-        self.x+=self.vx; self.y+=self.vy; self.vx*=.91; self.vy*=.91; self.life-=1
+        self.x+=self.vx*dt; self.y+=self.vy*dt; self.vx*=.91; self.vy*=.91; self.life-=1
     def draw(self,surf):
         t=self.life/self.ml; r,g,b=self.col; sz=max(1,int(self.sz*t))
         pygame.draw.circle(surf,(int(r*t),int(g*t),int(b*t)),(int(self.x),int(self.y)),sz)
@@ -194,7 +268,7 @@ class CoinParticle:
         self.vy=random.uniform(-2,-4); self.vx=random.uniform(-1,1)
         self.life=self.ml=random.randint(80,130); self.r=random.randint(4,8); self.alive=True
     def update(self):
-        self.y+=self.vy; self.x+=self.vx; self.vy+=0.05; self.life-=1
+        self.y+=self.vy*dt; self.x+=self.vx*dt; self.vy+=0.05*dt; self.life-=1
         if self.life<=0: self.alive=False
     def draw(self,surf,ox,oy):
         t=self.life/self.ml; sx,sy=int(self.x-ox),int(self.y-oy)
@@ -209,7 +283,7 @@ class Bullet:
         spd=14*spd_m; self.vx,self.vy=nx*spd,ny*spd
         self.dmg=dmg; self.pierce=pierce; self.life=lifetime
         self.hit=set(); self.col=col; self.sz=size; self.enemy=enemy
-    def update(self): self.x+=self.vx; self.y+=self.vy; self.life-=1
+    def update(self): self.x+=self.vx*dt; self.y+=self.vy*dt; self.life-=1
     def draw(self,surf,ox,oy):
         sx,sy=int(self.x-ox),int(self.y-oy)
         for i in range(1,5):
@@ -248,7 +322,7 @@ class ChainBolt:
     def update(self):
         self.trail.append((self.x,self.y))
         if len(self.trail)>8: self.trail.pop(0)
-        self.x+=self.vx; self.y+=self.vy; self.life-=1
+        self.x+=self.vx*dt; self.y+=self.vy*dt; self.life-=1
     def draw(self,surf,ox,oy):
         for i,(tx,ty) in enumerate(self.trail):
             a=(i+1)/max(len(self.trail),1)
@@ -406,12 +480,12 @@ class Enemy:
             a=random.uniform(0,math.tau); r=random.uniform(40,120)
             self.x+=math.cos(a)*r; self.y+=math.sin(a)*r; return
         if self.charging:
-            self.x+=self.charge_vx; self.y+=self.charge_vy
+            self.x+=self.charge_vx*dt; self.y+=self.charge_vy*dt
             self.charge_timer-=1
             if self.charge_timer<=0: self.charging=False
             return
         dx,dy=px-self.x,py-self.y; nx,ny=norm(dx,dy)
-        self.facing=math.atan2(ny,nx); self.x+=nx*self.speed; self.y+=ny*self.speed
+        self.facing=math.atan2(ny,nx); self.x+=nx*self.speed*dt; self.y+=ny*self.speed*dt
 
     def take_damage(self,dmg,curse_bonus=0):
         if self.etype=="shielder" and random.random()<.3: dmg=max(1,dmg//3)
@@ -862,7 +936,7 @@ class Player:
 
     def move(self,keys):
         if self.dashing:
-            self.x+=self.dash_vx; self.y+=self.dash_vy; self.dash_frames-=1
+            self.x+=self.dash_vx*dt; self.y+=self.dash_vy*dt; self.dash_frames-=1
             if self.dash_frames<=0: self.dashing=False; return
         dx=dy=0
         if keys[pygame.K_w] or keys[pygame.K_UP]: dy-=1
@@ -870,7 +944,7 @@ class Player:
         if keys[pygame.K_a] or keys[pygame.K_LEFT]: dx-=1
         if keys[pygame.K_d] or keys[pygame.K_RIGHT]: dx+=1
         if dx or dy:
-            nx,ny=norm(dx,dy); self.x+=nx*self.speed; self.y+=ny*self.speed
+            nx,ny=norm(dx,dy); self.x+=nx*self.speed*dt; self.y+=ny*self.speed*dt
             self.angle=math.atan2(ny,nx)
 
     def start_dash(self,vx,vy,dmg,frames):
@@ -1435,7 +1509,7 @@ async def index_screen(save):
                     dtxt(screen,"??? UNDISCOVERED EVENT",font_sm,GRAY,bx+140,by+bh//2)
 
         pygame.display.flip()
-        await asyncio.sleep(0)
+        dt = min(clock.tick_busy_loop(FPS) / (1000.0 / FPS), 2.0); await asyncio.sleep(0)
         for ev in pygame.event.get():
             if ev.type==pygame.QUIT: pygame.quit(); sys.exit()
             if ev.type==pygame.KEYDOWN:
@@ -1475,7 +1549,7 @@ async def card_log_screen(acquired,player):
             dtxt(screen,"No upgrades chosen yet.",font_sm,GRAY,W//2,H//2)
 
         pygame.display.flip()
-        await asyncio.sleep(0)
+        dt = min(clock.tick_busy_loop(FPS) / (1000.0 / FPS), 2.0); await asyncio.sleep(0)
         for ev in pygame.event.get():
             if ev.type==pygame.QUIT: pygame.quit(); sys.exit()
             if ev.type==pygame.KEYDOWN:
@@ -1507,7 +1581,7 @@ async def meta_upgrade_screen(save):
             msg_timer-=1
             dtxt(screen,msg,font_med,(100,255,120) if "✓" in msg else (255,100,100),W//2,H-48)
         pygame.display.flip()
-        await asyncio.sleep(0)
+        dt = min(clock.tick_busy_loop(FPS) / (1000.0 / FPS), 2.0); await asyncio.sleep(0)
         for ev in pygame.event.get():
             if ev.type==pygame.QUIT: pygame.quit(); sys.exit()
             if ev.type==pygame.KEYDOWN:
@@ -1638,7 +1712,7 @@ async def weapon_select_screen(save):
         dtxt(screen,sel_info[0],font_big,sel_info[2],W//2,H-70)
         dtxt(screen,"ENTER or click ▼ to start",font_sm,WHITE,W//2,H-35)
         pygame.display.flip()
-        await asyncio.sleep(0)
+        dt = min(clock.tick_busy_loop(FPS) / (1000.0 / FPS), 2.0); await asyncio.sleep(0)
         for ev in pygame.event.get():
             if ev.type==pygame.QUIT: pygame.quit(); sys.exit()
             if ev.type==pygame.KEYDOWN:
@@ -1666,6 +1740,8 @@ async def death_screen(save,wave,level,kills,boss_kills,score,weapon_name):
     save["total_kills"]=save.get("total_kills",0)+kills
     if wave>save.get("best_wave",0): save["best_wave"]=wave
     write_save(save)
+    # ── Submit score to server leaderboard (non-blocking) ──────────────────
+    submit_score_async(wave, level, kills, boss_kills, score, weapon_name)
     t=0
     while True:
         screen.fill(BG)
@@ -1684,7 +1760,7 @@ async def death_screen(save,wave,level,kills,boss_kills,score,weapon_name):
         dtxt(screen,f"Total: {save['supercoins']} ✦   Best wave: {save['best_wave']}",font_sm,COIN_C,W//2,H//2+60)
         dtxt(screen,"R=restart   M=meta upgrades   ESC=quit",font_sm,GRAY,W//2,H//2+138)
         pygame.display.flip()
-        await asyncio.sleep(0)
+        dt = min(clock.tick_busy_loop(FPS) / (1000.0 / FPS), 2.0); await asyncio.sleep(0)
         for ev in pygame.event.get():
             if ev.type==pygame.QUIT: pygame.quit(); sys.exit()
             if ev.type==pygame.KEYDOWN:
@@ -2026,7 +2102,7 @@ async def game_loop(starting_weapon,save):
             dtxt(screen,"R / M = results & coins",font_sm,GRAY,W//2,H//2+75)
 
         pygame.display.flip()
-        await asyncio.sleep(0)
+        dt = min(clock.tick_busy_loop(FPS) / (1000.0 / FPS), 2.0); await asyncio.sleep(0)
 
 def _apply_upgrade(upg,player,acquired,save):
     upg["apply"](player)
@@ -2058,7 +2134,7 @@ async def title_screen(save):
               "Bosses: waves 5, 8, 11, 14…"]
         for k,tip in enumerate(tips): dtxt(screen,tip,font_xs,(100,100,150),W//2,H//2+95+k*18)
         pygame.display.flip()
-        await asyncio.sleep(0)
+        dt = min(clock.tick_busy_loop(FPS) / (1000.0 / FPS), 2.0); await asyncio.sleep(0)
         for ev in pygame.event.get():
             if ev.type==pygame.QUIT: pygame.quit(); sys.exit()
             if ev.type==pygame.KEYDOWN:
@@ -2069,6 +2145,90 @@ async def title_screen(save):
 
 
 import asyncio
+
+async def server_login_screen():
+    """Optional login screen shown once at startup if not already logged in."""
+    if _account.get("token"):
+        return  # already logged in from saved file
+
+    font_t = pygame.font.SysFont("consolas", 36, bold=True)
+    font_m = pygame.font.SysFont("consolas", 20, bold=True)
+    font_s = pygame.font.SysFont("consolas", 16)
+
+    fields    = ["", ""]   # username, password
+    active    = 0          # which field is focused
+    status    = ""
+    status_ok = False
+    show_pw   = False
+
+    labels = ["USERNAME", "PASSWORD"]
+
+    def draw():
+        screen.fill((10, 10, 18))
+        for i in range(0, W, 80): pygame.draw.line(screen, (20,20,35), (i,0),(i,H))
+        for j in range(0, H, 80): pygame.draw.line(screen, (20,20,35), (0,j),(W,j))
+
+        dtxt(screen, "HORDE SURVIVOR", font_t, (80,200,255), W//2, 120)
+        dtxt(screen, "SIGN IN TO SUBMIT SCORES", font_s, (150,150,150), W//2, 165)
+
+        bw, bh = 420, 52
+        bx = W//2 - bw//2
+
+        for i, label in enumerate(labels):
+            by = 220 + i * 90
+            dtxt(screen, label, font_s, (150,150,150), W//2, by - 18)
+            col = (80,200,255) if active == i else (60,60,80)
+            pygame.draw.rect(screen, (20,20,30), (bx, by, bw, bh), border_radius=8)
+            pygame.draw.rect(screen, col, (bx, by, bw, bh), 2, border_radius=8)
+            val = fields[i] if (i == 0 or show_pw) else "•" * len(fields[i])
+            surf = font_m.render(val, True, (255,255,255))
+            screen.blit(surf, (bx + 14, by + 14))
+
+        # Show/hide password hint
+        dtxt(screen, "TAB=show password", font_s, (80,80,100), W//2, 410)
+
+        # Login button
+        btn_y = 450
+        pygame.draw.rect(screen, (0,40,20), (W//2-160, btn_y, 320, 50), border_radius=10)
+        pygame.draw.rect(screen, (60,255,120), (W//2-160, btn_y, 320, 50), 2, border_radius=10)
+        dtxt(screen, "ENTER  =  LOGIN", font_m, (60,255,120), W//2, btn_y+25)
+
+        # Skip button
+        dtxt(screen, "ESC = play offline (scores won't be saved)", font_s, (100,100,100), W//2, 530)
+
+        # Status message
+        if status:
+            col = (60,255,120) if status_ok else (220,50,50)
+            dtxt(screen, status, font_s, col, W//2, 575)
+
+        pygame.display.flip()
+
+    while True:
+        draw()
+        dt = min(clock.tick_busy_loop(FPS) / (1000.0 / FPS), 2.0); await asyncio.sleep(0)
+        for ev in pygame.event.get():
+            if ev.type == pygame.QUIT: pygame.quit(); sys.exit()
+            if ev.type == pygame.KEYDOWN:
+                if ev.key == pygame.K_ESCAPE: return          # skip login
+                if ev.key == pygame.K_TAB:
+                    if active == 1: show_pw = not show_pw
+                    else: active = 1
+                elif ev.key == pygame.K_RETURN:
+                    if fields[0] and fields[1]:
+                        status = "Connecting…"; status_ok = True; draw()
+                        ok, msg = login_to_server(fields[0], fields[1])
+                        status = msg; status_ok = ok
+                        if ok:
+                            dt = min(clock.tick_busy_loop(FPS) / (1000.0 / FPS), 2.0); await asyncio.sleep(0); draw()
+                            pygame.time.wait(800)
+                            return
+                elif ev.key == pygame.K_BACKSPACE:
+                    fields[active] = fields[active][:-1]
+                elif ev.key == pygame.K_UP or ev.key == pygame.K_DOWN:
+                    active = 1 - active
+                else:
+                    ch = ev.unicode
+                    if ch and len(fields[active]) < 32: fields[active] += ch
 
 async def main():
     global screen, clock, font_huge, font_big, font_med, font_sm, font_xs
@@ -2082,10 +2242,11 @@ async def main():
     font_sm   = pygame.font.SysFont("consolas", 16)
     font_xs   = pygame.font.SysFont("consolas", 13)
     save = load_save()
+    await server_login_screen()   # ← login before title screen
     await title_screen(save)
     while True:
         sw = await weapon_select_screen(save)
         await game_loop(sw, save)
-        await asyncio.sleep(0)
+        dt = min(clock.tick_busy_loop(FPS) / (1000.0 / FPS), 2.0); await asyncio.sleep(0)
 
 asyncio.run(main())
